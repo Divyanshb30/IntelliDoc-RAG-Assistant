@@ -203,15 +203,67 @@ Assessment:"""
             if not chunks:
                 return "No relevant information found in the documents."
             
-            context = chunks[0].get("text", "")[:1000]
+            # Get best matching chunks
+            context_parts = []
+            for chunk in chunks[:3]:
+                context_parts.append(chunk.get("text", ""))
             
-            prompt = f"""Answer in 2-3 concise sentences using only the context below.
+            context = " ".join(context_parts)[:1800]
+            
+            # ULTRA STRICT PROMPT - Prevents question generation
+            prompt = f"""Based on the information below, provide a direct factual answer to the question. Do NOT generate questions, do NOT ask for clarification, do NOT list numbered points unless specifically asked.
 
-Question: {query}
+QUESTION: {query}
 
-Context: {context}
+INFORMATION:
+{context}
 
-Answer:"""
+ANSWER (write 2-3 complete sentences stating facts only):"""
+
+            try:
+                response = self.llm(
+                    prompt,
+                    max_tokens=120,
+                    temperature=0.2,  # Very low for factual
+                    top_p=0.8,
+                    stop=["\n\nQUESTION:", "\nQUESTION:", "INFORMATION:", "\n\n\n", "1.", "2.", "3.", "###", "Question:", "question:"],
+                    repeat_penalty=1.5  # High penalty to prevent repetition
+                )
+                
+                answer = response['choices'][0]['text'].strip()
+                
+                # Clean answer
+                for prefix in ["ANSWER:", "Answer:", "Direct Answer:", "Response:", "Based on", "According to"]:
+                    if answer.startswith(prefix):
+                        answer = answer[len(prefix):].strip()
+                
+                answer = answer.lstrip('•-– :')
+                
+                # Remove if starts with number (likely a question)
+                if answer and answer[0].isdigit() and '. ' in answer[:5]:
+                    return self._fallback_answer(tool_output, tool_name)
+                
+                # Check for question words at start
+                question_words = ['what', 'how', 'why', 'when', 'where', 'who', 'which', 'compare', 'list']
+                if any(answer.lower().startswith(word) for word in question_words):
+                    return self._fallback_answer(tool_output, tool_name)
+                
+                # Ensure proper ending
+                if answer and answer[-1] not in '.!?':
+                    last_period = max(answer.rfind('.'), answer.rfind('!'), answer.rfind('?'))
+                    if last_period > 20:
+                        answer = answer[:last_period + 1]
+                
+                # Length validation
+                if len(answer) < 15 or len(answer) > 600:
+                    return self._fallback_answer(tool_output, tool_name)
+                
+                return answer
+                
+            except Exception as e:
+                print(f"LLM generation error: {e}")
+                return self._fallback_answer(tool_output, tool_name)
+
 
         else:  # summarizer
             highlights = tool_output.get("highlights", [])
@@ -304,8 +356,13 @@ Summary:"""
         elif tool_name == "document_search":
             chunks = tool_output.get("chunks", [])
             if chunks:
-                return chunks[0].get("text", "")[:300] + "..."
-            return "No relevant information found."
+                # Return first chunk directly as factual answer
+                text = chunks[0].get("text", "")
+                # Get first 2-3 sentences
+                sentences = text.split('.')[:3]
+                return '. '.join(sentences).strip() + '.'
+            return "No relevant information found in the documents."
+
         
         else:  # summarizer
             highlights = tool_output.get("highlights", [])
