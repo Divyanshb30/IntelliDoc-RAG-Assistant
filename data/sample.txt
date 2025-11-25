@@ -1,0 +1,40 @@
+Company Overview:
+TechCorp Solutions is a leading software development company founded in 2010. 
+We specialize in AI, cloud computing, and enterprise solutions.
+
+Products:
+- CloudSync Pro: Enterprise cloud storage solution
+- AI Assistant Platform: Customizable AI chatbot framework
+- DataViz Suite: Business intelligence and analytics tools
+
+Contact:
+Email: info@techcorp.com
+Phone: +1-555-0123
+Address: 123 Tech Street, San Francisco, CA 94105
+
+Operating Hours:
+Monday to Friday: 9 AM to 6 PM PST
+Weekend: Closed
+
+Team:
+Our team consists of 50+ engineers, designers, and product managers.
+We have offices in San Francisco, New York, and London.
+
+Services:
+1. Custom Software Development
+2. AI/ML Consulting
+3. Cloud Migration Services
+4. DevOps & Infrastructure Management
+5. Technical Training Programs
+
+Recent Projects:
+- Built AI chatbot for Fortune 500 company
+- Migrated enterprise systems to AWS cloud
+- Developed real-time analytics dashboard
+- Implemented microservices architecture for e-commerce platform
+
+Awards:
+- Best AI Solution Provider 2023
+- Top Cloud Services Company 2022
+- Innovation Award in Enterprise Software 2021
+
