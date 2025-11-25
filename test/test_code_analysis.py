@@ -12,10 +12,6 @@ def calculate_average(numbers):
     return total / len(numbers)  # BUG: Division by zero if empty!
 
 
-# Issue 2: Hardcoded credentials (CRITICAL SECURITY ISSUE)
-DATABASE_PASSWORD = "admin123"
-API_KEY = "sk-1234567890abcdef"
-SECRET_TOKEN = "super_secret_token_12345"
 
 
 # Issue 3: SQL Injection vulnerability
