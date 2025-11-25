@@ -5,14 +5,36 @@ from tools import get_tools
 from agent import RAGAgent
 import os
 import time
-import pickle
 
 # Page config
 st.set_page_config(
     page_title="IntelliCode RAG Assistant",
     page_icon="🧠",
-    layout="wide"
+    layout="wide",
+    initial_sidebar_state="expanded"
 )
+
+# Custom CSS
+st.markdown("""
+<style>
+    .main-header {
+        font-size: 2.5rem;
+        font-weight: 700;
+        color: #1f77b4;
+        margin-bottom: 0.5rem;
+    }
+    .sub-header {
+        font-size: 1.1rem;
+        color: #666;
+        margin-bottom: 2rem;
+    }
+    .stButton>button {
+        width: 100%;
+        border-radius: 5px;
+        font-weight: 500;
+    }
+</style>
+""", unsafe_allow_html=True)
 
 # Initialize session state
 if 'messages' not in st.session_state:
@@ -26,9 +48,8 @@ if 'code_file' not in st.session_state:
 if 'trigger_query' not in st.session_state:
     st.session_state.trigger_query = None
 
-
 def process_uploaded_file(uploaded_file, file_path):
-    """Process uploaded files based on type"""
+    """Process uploaded files"""
     file_type = uploaded_file.name.split('.')[-1].lower()
     
     if file_type == 'pdf':
@@ -37,431 +58,431 @@ def process_uploaded_file(uploaded_file, file_path):
         text = ""
         for page in pdf_reader.pages:
             text += page.extract_text() + "\n\n"
-        
-        # Save as txt for RAG processing
-        txt_path = file_path.replace('.pdf', '.txt')
-        with open(txt_path, 'w', encoding='utf-8') as f:
+        text_path = file_path.replace('.pdf', '.txt')
+        with open(text_path, 'w', encoding='utf-8') as f:
             f.write(text)
-        return txt_path
-    
-    return file_path
-
-@st.cache_resource
-def load_system():
-    """Load RAG, LLM, and Agent (cached)"""
-    with st.spinner("🔄 Loading AI system... (this takes ~30 seconds)"):
-        # Load RAG
-        rag = RAGPipeline()
-        if os.path.exists("vector_store/index.faiss"):
-            rag.load_index("vector_store")
-        else:
-            st.warning("⚠️ No vector store found. Upload documents to build knowledge base.")
-        
-        # Load LLM
-        llm = Llama(
-            model_path="models/qwen2.5-3b-instruct-q4_k_m.gguf",
-            n_ctx=2048,
-            verbose=False
-        )
-        
-        # Initialize tools and agent
-        tools = get_tools(rag)
-        agent = RAGAgent(llm, tools)
-        
-        return agent, rag
+        return True
+    elif file_type in ['txt', 'md', 'csv', 'py']:
+        return True
+    else:
+        st.warning(f"Unsupported file type: {file_type}")
+        return False
 
 # Sidebar
 with st.sidebar:
-    st.title("🧠 IntelliCode RAG")
-    st.markdown("AI-Powered Code & Document Assistant")
-    st.markdown("---")
+    st.markdown("## IntelliCode RAG")
+    st.markdown("*AI-powered code analysis*")
+    st.divider()
     
-    # Tab selection
-    tab = st.radio("Mode", ["📄 Documents", "💻 Code Analysis"], label_visibility="collapsed")
+    mode = st.radio("**Mode**", ["Documents", "Code Analysis"], key="mode")
     
-    if tab == "📄 Documents":
-        st.subheader("📄 Document Upload")
-        doc_file = st.file_uploader(
-            "Upload documents",
-            type=['txt', 'pdf', 'csv'],
-            help="Upload documents to add to knowledge base",
-            key='doc_upload'
+    if mode == "Documents":
+        st.markdown("### Upload Documents")
+        uploaded_files = st.file_uploader(
+            "Upload files",
+            type=['txt', 'pdf', 'csv', 'md'],
+            accept_multiple_files=True,
+            key="doc_uploader"
         )
         
-        if doc_file:
-            file_type = doc_file.name.split('.')[-1]
-            os.makedirs("data", exist_ok=True)
-            file_path = os.path.join("data", doc_file.name)
+        if uploaded_files:
+            data_dir = "data"
+            os.makedirs(data_dir, exist_ok=True)
             
-            with open(file_path, "wb") as f:
-                f.write(doc_file.getbuffer())
+            for uploaded_file in uploaded_files:
+                file_path = os.path.join(data_dir, uploaded_file.name)
+                with open(file_path, 'wb') as f:
+                    f.write(uploaded_file.getbuffer())
+                process_uploaded_file(uploaded_file, file_path)
             
-            st.success(f"✅ Uploaded: {doc_file.name}")
+            st.success(f"Uploaded {len(uploaded_files)} file(s)")
             
-            if file_type.lower() == 'pdf':
-                with st.spinner("Processing PDF..."):
-                    process_uploaded_file(doc_file, file_path)
-                    st.success("✅ PDF processed!")
-            
-            if st.button("🔄 Rebuild Knowledge Base"):
-                with st.spinner("Rebuilding vector index..."):
-                    rag = RAGPipeline()
-                    rag.load_documents("data")
-                    rag.build_index()
-                    rag.save_index()
-                    st.success("✅ Knowledge base updated!")
-                    st.cache_resource.clear()
-                    st.rerun()
+            if st.button("Build Knowledge Base", type="primary"):
+                with st.spinner("Building..."):
+                    if st.session_state.rag is None:
+                        st.session_state.rag = RAGPipeline()
+                    st.session_state.rag.build_index(data_dir)
+                st.success("Ready!")
     
     else:  # Code Analysis
-        st.subheader("💻 Code Analysis")
+        st.markdown("### Upload Code")
         code_file = st.file_uploader(
             "Upload Python file",
             type=['py'],
-            help="Upload .py file for analysis",
-            key='code_upload'
+            key="code_uploader"
         )
         
         if code_file:
-            os.makedirs("temp", exist_ok=True)
-            code_path = os.path.join("temp", code_file.name)
+            temp_dir = "temp"
+            os.makedirs(temp_dir, exist_ok=True)
+            file_path = os.path.join(temp_dir, code_file.name)
             
-            with open(code_path, "wb") as f:
+            with open(file_path, 'wb') as f:
                 f.write(code_file.getbuffer())
             
             st.session_state.code_file = {
                 'name': code_file.name,
-                'path': code_path,
+                'path': file_path,
                 'type': 'code'
             }
             
-            st.success(f"✅ Loaded: {code_file.name}")
+            st.success(f"Loaded: {code_file.name}")
             
-            # Show file preview
-            with st.expander("📝 File Preview"):
-                with open(code_path, 'r') as f:
-                    code_content = f.read()
-                st.code(code_content[:500] + "..." if len(code_content) > 500 else code_content, 
-                       language='python', 
-                       line_numbers=True)
+            # Quick Actions
+            st.markdown("### Quick Actions")
             
-            # Quick action buttons
-            st.markdown("**Quick Actions:**")
             col1, col2 = st.columns(2)
-
+            
             with col1:
-                if st.button("🔍 Analyze Code", use_container_width=True, key="analyze_btn"):
-                    # Add message and trigger processing
-                    query = f"Analyze {code_file.name} for code quality issues"
-                    st.session_state.messages.append({
-                        "role": "user", 
-                        "content": query
-                    })
-                    st.session_state.trigger_query = query
-                    st.rerun()
-
+                if st.button("Analyze Code", use_container_width=True):
+                    st.session_state.trigger_query = "Analyze this code"
+                
+                if st.button("Security Scan", use_container_width=True):
+                    st.session_state.trigger_query = "Check security vulnerabilities"
+                
+                if st.button("Generate Tests", use_container_width=True):
+                    st.session_state.trigger_query = "Generate pytest tests"
+                
+                if st.button("Fix Issues", use_container_width=True):
+                    st.session_state.trigger_query = "Fix the issues"
+            
             with col2:
-                if st.button("🛡️ Security Scan", use_container_width=True, key="security_btn"):
-                    # Add message and trigger processing
-                    query = f"Check {code_file.name} for security vulnerabilities"
-                    st.session_state.messages.append({
-                        "role": "user", 
-                        "content": query
-                    })
-                    st.session_state.trigger_query = query
-                    st.rerun()
-
+                if st.button("Run Code", use_container_width=True):
+                    st.session_state.trigger_query = "Run this code"
+                
+                if st.button("Code Metrics", use_container_width=True):
+                    st.session_state.trigger_query = "Show code metrics"
+                
+                if st.button("Find Bugs", use_container_width=True):
+                    st.session_state.trigger_query = "Find bugs in code"
+                
+                if st.button("Explain Code", use_container_width=True):
+                    st.session_state.trigger_query = "Explain this code"
     
-    st.markdown("---")
-    
-    # Stats
-    st.subheader("📊 System Info")
-    if os.path.exists("vector_store/index.faiss"):
-        try:
-            with open("vector_store/chunks.pkl", 'rb') as f:
-                chunks = pickle.load(f)
-            st.metric("Document Chunks", len(chunks))
-        except:
-            st.metric("Document Chunks", "N/A")
-    
-    if st.session_state.code_file:
-        st.metric("Code File", st.session_state.code_file['name'])
-    
-    # Clear chat
-    if st.button("🗑️ Clear Chat"):
-        st.session_state.messages = []
-        st.rerun()
-    
-    st.markdown("---")
-    st.subheader("💡 Example Queries")
-    
-    if tab == "📄 Documents":
-        examples = [
-            "What are the main features?",
-            "Summarize the documentation",
-            "Explain the API endpoints"
-        ]
-    else:
-        examples = [
-            "Analyze the code for issues",
-            "Check for security vulnerabilities",
-            "Find potential bugs"
-        ]
-    
-    for query in examples:
-        if st.button(query, key=f"ex_{query}"):
-            st.session_state.messages.append({"role": "user", "content": query})
-            st.rerun()
+    st.divider()
+    st.caption("Qwen2.5-3B | FAISS | AST Parser")
 
 # Main content
-st.title("💬 IntelliCode RAG Assistant")
-st.markdown("Advanced AI assistant for code analysis and document intelligence")
+st.markdown('<p class="main-header">IntelliCode RAG Assistant</p>', unsafe_allow_html=True)
+st.markdown('<p class="sub-header">AI-powered code analysis and documentation</p>', unsafe_allow_html=True)
 
-# Load system
+# Initialize agent
 if st.session_state.agent is None:
-    try:
-        agent, rag = load_system()
-        st.session_state.agent = agent
-        st.session_state.rag = rag
-        st.success("✅ AI System Ready!")
-    except Exception as e:
-        st.error(f"❌ Error loading system: {e}")
-        st.info("Make sure the model file exists in models/ folder")
-        st.stop()
+    with st.spinner("Loading AI model..."):
+        try:
+            llm = Llama(
+                model_path="models/qwen2.5-3b-instruct-q4_k_m.gguf",
+                n_ctx=4096,
+                n_threads=8,
+                verbose=False
+            )
+            
+            if st.session_state.rag is None:
+                st.session_state.rag = RAGPipeline()
+            
+            tools = get_tools(st.session_state.rag)
+            st.session_state.agent = RAGAgent(llm, tools)
+            st.success("Model loaded")
+            
+        except Exception as e:
+            st.error(f"Failed to load model: {e}")
+            st.stop()
 
-# Display chat messages
+# Display chat history
 for message in st.session_state.messages:
     with st.chat_message(message["role"]):
         st.markdown(message["content"])
         
-        if message["role"] == "assistant":
-            if "tool" in message:
-                st.caption(f"🔧 Tool: **{message['tool']}**")
-            if "response_time" in message:
-                st.caption(f"⏱️ Time: **{message['response_time']:.2f}s**")
+        if "raw_output" in message and message.get("tool"):
+            raw = message["raw_output"]
+            tool = message.get("tool")
             
-            # Show detailed results for code analysis
-            if "raw_output" in message:
-                raw = message["raw_output"]
-                
-                if message.get("tool") == "code_analyzer":
-                    with st.expander("📊 Detailed Analysis"):
-                        col1, col2, col3 = st.columns(3)
-                        with col1:
-                            st.metric("Issues Found", len(raw.get("issues", [])))
-                        with col2:
-                            st.metric("Severity", raw.get("severity", "N/A"))
-                        with col3:
-                            st.metric("Lines", raw.get("lines", 0))
+            # CODE ANALYZER
+            if tool == "code_analyzer":
+                with st.expander("Detailed Analysis"):
+                    issues = raw.get("issues", [])
+                    metrics = raw.get("metrics", {})
+                    
+                    col1, col2, col3 = st.columns(3)
+                    with col1:
+                        st.metric("Issues", len(issues))
+                    with col2:
+                        st.metric("Severity", raw.get("severity", "N/A"))
+                    with col3:
+                        st.metric("Comments", f"{metrics.get('comment_ratio', 0):.1f}%")
+                    
+                    for issue in issues:
+                        severity = issue.get("severity", "UNKNOWN")
+                        line = issue.get("line", "N/A")
+                        issue_type = issue.get("type", "Unknown")
+                        message_text = issue.get("message", "")
+                        suggestion = issue.get("suggestion", "")
                         
-                        # Show issues
-                        if raw.get("issues"):
-                            st.markdown("**Issues:**")
-                            for issue in raw["issues"]:
-                                severity_color = {
-                                    "HIGH": "🔴",
-                                    "MEDIUM": "🟡",
-                                    "LOW": "🟢"
-                                }.get(issue["severity"], "⚪")
-                                
-                                st.markdown(f"{severity_color} **Line {issue['line']}**: {issue['type']}")
-                                st.caption(f"_{issue['message']}_")
-                
-                elif message.get("tool") == "security_scanner":
-                    with st.expander("🛡️ Security Report"):
-                        col1, col2 = st.columns(2)
-                        with col1:
-                            st.metric("Risk Level", raw.get("risk_level", "N/A"))
-                        with col2:
-                            st.metric("Vulnerabilities", raw.get("total_issues", 0))
+                        st.markdown(f"**Line {line}: {issue_type}** ({severity})")
                         
-                        # Show vulnerabilities
-                        if raw.get("vulnerabilities"):
-                            for vuln in raw["vulnerabilities"]:
-                                severity_emoji = {
-                                    "CRITICAL": "🚨",
-                                    "HIGH": "🔴",
-                                    "MEDIUM": "🟡",
-                                    "LOW": "🟢"
-                                }.get(vuln["severity"], "⚪")
-                                
-                                st.markdown(f"{severity_emoji} **{vuln['type']}** ({vuln['severity']})")
-                                st.caption(vuln["description"])
-                                if "fix" in vuln:
-                                    st.info(f"💡 Fix: {vuln['fix']}")
+                        if severity == "HIGH":
+                            st.error(message_text)
+                        elif severity == "MEDIUM":
+                            st.warning(message_text)
+                        else:
+                            st.info(message_text)
+                        
+                        if suggestion:
+                            st.success(f"Suggestion: {suggestion}")
+                        st.divider()
+            
+            # SECURITY SCANNER
+            elif tool == "security_scanner":
+                with st.expander("Security Report"):
+                    vulns = raw.get("vulnerabilities", [])
+                    
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        st.metric("Vulnerabilities", len(vulns))
+                    with col2:
+                        st.metric("Risk Level", raw.get("risk_level", "N/A"))
+                    
+                    for vuln in vulns:
+                        severity = vuln.get("severity", "UNKNOWN")
+                        line = vuln.get("line", "N/A")
+                        vuln_type = vuln.get("type", "Unknown")
+                        description = vuln.get("description", "No description")
+                        fix = vuln.get("fix", "No fix available")
+                        
+                        st.markdown(f"**Line {line}: {vuln_type}** ({severity})")
+                        st.error(description)
+                        st.success(f"Fix: {fix}")
+                        st.divider()
+            
+            # CODE EXECUTOR
+            elif tool == "code_executor":
+                with st.expander("Execution Output"):
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        st.metric("Exit Code", raw.get("exit_code", 0))
+                    with col2:
+                        st.metric("Time", raw.get("execution_time", "N/A"))
+                    
+                    output = raw.get("output", "")
+                    error = raw.get("error", "")
+                    
+                    if output:
+                        st.markdown("**Output:**")
+                        st.code(output, language="text")
+                    
+                    if error:
+                        st.markdown("**Errors:**")
+                        st.code(error, language="text")
+            
+            # TEST GENERATOR
+            elif tool == "test_generator":
+                with st.expander("Test Results"):
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        st.metric("Functions", raw.get("functions_found", 0))
+                    with col2:
+                        st.metric("Test Cases", raw.get("test_cases_generated", 0))
+                    
+                    st.markdown("**Functions:**")
+                    for func in raw.get("functions", []):
+                        st.markdown(f"- `{func}()`")
+                    
+                    st.info(f"File: {raw.get('test_file', 'N/A')}")
+            
+            # CODE FIXER
+            elif tool == "code_fixer":
+                with st.expander("Fix Suggestions"):
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        st.metric("Issues", raw.get("original_issues", 0))
+                    with col2:
+                        st.metric("Fixes", raw.get("fixes_suggested", 0))
+                    
+                    fixes = raw.get("fixes", [])
+                    for i, fix in enumerate(fixes[:5], 1):
+                        severity = fix.get("severity", "UNKNOWN")
+                        line = fix.get("line", "N/A")
+                        issue_type = fix.get("issue_type", "Unknown")
+                        original_msg = fix.get("original_message", "")
+                        fix_text = fix.get("fix", "")
+                        explanation = fix.get("explanation", "")
+                        code_example = fix.get("code_example", "")
+                        
+                        st.markdown(f"**Fix #{i}: Line {line}** ({severity})")
+                        st.markdown(f"**Issue:** {issue_type}")
+                        st.info(original_msg)
+                        st.success(f"**Solution:** {fix_text}")
+                        st.markdown(f"**Why:** {explanation}")
+                        
+                        if code_example:
+                            st.markdown("**Code Example:**")
+                            st.code(code_example, language="python")
+                        
+                        st.divider()
 
-# Process triggered query from quick actions
-if 'trigger_query' in st.session_state and st.session_state.trigger_query:
+# Handle triggered queries
+if st.session_state.trigger_query:
     prompt = st.session_state.trigger_query
-    st.session_state.trigger_query = None  # Clear trigger
-    
-    # Generate response
-    with st.chat_message("assistant"):
-        message_placeholder = st.empty()
-        
-        with st.spinner("🤔 Analyzing..."):
-            start_time = time.time()
-            
-            # Get file context
-            file_context = st.session_state.code_file
-            
-            # Execute agent
-            result = st.session_state.agent.execute(prompt, file_context=file_context)
-            
-            response_time = time.time() - start_time
-        
-        # Stream answer
-        full_answer = result['answer']
-        words = full_answer.split()
-        displayed_text = ""
-        
-        for word in words:
-            displayed_text += word + " "
-            message_placeholder.markdown(displayed_text + "▌")
-            time.sleep(0.04)
-        
-        message_placeholder.markdown(full_answer)
-        
-        # Display metadata
-        col1, col2 = st.columns(2)
-        with col1:
-            st.caption(f"🔧 Tool: **{result['tool_used']}**")
-        with col2:
-            st.caption(f"⏱️ Time: {response_time:.2f}s")
-        
-        # Show detailed results
-        raw = result['raw_output']
-        
-        if result['tool_used'] == "code_analyzer":
-            with st.expander("📊 Detailed Analysis"):
-                col1, col2, col3 = st.columns(3)
-                with col1:
-                    st.metric("Issues", len(raw.get("issues", [])))
-                with col2:
-                    st.metric("Severity", raw.get("severity", "N/A"))
-                with col3:
-                    st.metric("Lines", raw.get("lines", 0))
-                
-                if raw.get("issues"):
-                    st.markdown("**Issues:**")
-                    for issue in raw["issues"]:
-                        severity_color = {"HIGH": "🔴", "MEDIUM": "🟡", "LOW": "🟢"}.get(issue["severity"], "⚪")
-                        st.markdown(f"{severity_color} **Line {issue['line']}**: {issue['type']}")
-                        st.caption(f"_{issue['message']}_")
-        
-        elif result['tool_used'] == "security_scanner":
-            with st.expander("🛡️ Security Report"):
-                col1, col2 = st.columns(2)
-                with col1:
-                    st.metric("Risk Level", raw.get("risk_level", "N/A"))
-                with col2:
-                    st.metric("Vulnerabilities", raw.get("total_issues", 0))
-                
-                if raw.get("vulnerabilities"):
-                    for vuln in raw["vulnerabilities"]:
-                        severity_emoji = {"CRITICAL": "🚨", "HIGH": "🔴", "MEDIUM": "🟡", "LOW": "🟢"}.get(vuln["severity"], "⚪")
-                        st.markdown(f"{severity_emoji} **{vuln['type']}** ({vuln['severity']})")
-                        st.caption(vuln["description"])
-                        if "fix" in vuln:
-                            st.info(f"💡 Fix: {vuln['fix']}")
-    
-    # Save assistant message
-    st.session_state.messages.append({
-        "role": "assistant",
-        "content": result['answer'],
-        "tool": result['tool_used'],
-        "response_time": response_time,
-        "raw_output": result['raw_output']
-    })
+    st.session_state.trigger_query = None
+else:
+    prompt = st.chat_input("Ask about your code or documents...")
 
-
-# Chat input
-if prompt := st.chat_input("Ask about your documents or code..."):
-    # Add user message
+# Process query
+if prompt:
     st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"):
         st.markdown(prompt)
     
-    # Generate response
-    with st.chat_message("assistant"):
-        message_placeholder = st.empty()
-        
-        with st.spinner("🤔 Analyzing..."):
-            start_time = time.time()
-            
-            # Get file context if code file uploaded
-            file_context = st.session_state.code_file
-            
-            # Execute agent
-            result = st.session_state.agent.execute(prompt, file_context=file_context)
-            
-            response_time = time.time() - start_time
-        
-        # Stream the answer word-by-word
-        full_answer = result['answer']
-        words = full_answer.split()
-        displayed_text = ""
-        
-        for word in words:
-            displayed_text += word + " "
-            message_placeholder.markdown(displayed_text + "▌")
-            time.sleep(0.04)
-        
-        # Show final answer
-        message_placeholder.markdown(full_answer)
-        
-        # Display metadata
-        col1, col2 = st.columns(2)
-        with col1:
-            st.caption(f"🔧 Tool: **{result['tool_used']}**")
-        with col2:
-            st.caption(f"⏱️ Time: {response_time:.2f}s")
-        
-        # Show detailed output based on tool
-        raw = result['raw_output']
-        
-        if result['tool_used'] == "code_analyzer":
-            with st.expander("📊 Detailed Analysis"):
-                col1, col2, col3 = st.columns(3)
-                with col1:
-                    st.metric("Issues", len(raw.get("issues", [])))
-                with col2:
-                    st.metric("Severity", raw.get("severity", "N/A"))
-                with col3:
-                    st.metric("Lines", raw.get("lines", 0))
-                
-                if raw.get("issues"):
-                    st.markdown("**Issues:**")
-                    for issue in raw["issues"]:
-                        severity_color = {"HIGH": "🔴", "MEDIUM": "🟡", "LOW": "🟢"}.get(issue["severity"], "⚪")
-                        st.markdown(f"{severity_color} **Line {issue['line']}**: {issue['type']}")
-                        st.caption(f"_{issue['message']}_")
-        
-        elif result['tool_used'] == "security_scanner":
-            with st.expander("🛡️ Security Report"):
-                col1, col2 = st.columns(2)
-                with col1:
-                    st.metric("Risk Level", raw.get("risk_level", "N/A"))
-                with col2:
-                    st.metric("Vulnerabilities", raw.get("total_issues", 0))
-                
-                if raw.get("vulnerabilities"):
-                    for vuln in raw["vulnerabilities"]:
-                        severity_emoji = {"CRITICAL": "🚨", "HIGH": "🔴", "MEDIUM": "🟡", "LOW": "🟢"}.get(vuln["severity"], "⚪")
-                        st.markdown(f"{severity_emoji} **{vuln['type']}** ({vuln['severity']})")
-                        st.caption(vuln["description"])
-                        if "fix" in vuln:
-                            st.info(f"💡 Fix: {vuln['fix']}")
+    file_context = None
+    if mode == "Code Analysis" and st.session_state.code_file:
+        file_context = st.session_state.code_file
     
-    # Save assistant message
+    with st.chat_message("assistant"):
+        with st.spinner("Processing..."):
+            start_time = time.time()
+            result = st.session_state.agent.execute(prompt, file_context=file_context)
+            elapsed = time.time() - start_time
+            
+            st.markdown(result["answer"])
+            
+            # Show detailed analysis for current response
+            if result.get("tool_used") and result.get("raw_output"):
+                raw = result["raw_output"]
+                tool = result["tool_used"]
+                
+                # CODE ANALYZER
+                if tool == "code_analyzer":
+                    with st.expander("Detailed Analysis", expanded=False):
+                        issues = raw.get("issues", [])
+                        metrics = raw.get("metrics", {})
+                        
+                        col1, col2, col3 = st.columns(3)
+                        with col1:
+                            st.metric("Issues", len(issues))
+                        with col2:
+                            st.metric("Severity", raw.get("severity", "N/A"))
+                        with col3:
+                            st.metric("Comments", f"{metrics.get('comment_ratio', 0):.1f}%")
+                        
+                        for issue in issues:
+                            severity = issue.get("severity", "UNKNOWN")
+                            line = issue.get("line", "N/A")
+                            issue_type = issue.get("type", "Unknown")
+                            msg = issue.get("message", "")
+                            suggestion = issue.get("suggestion", "")
+                            
+                            st.markdown(f"**Line {line}: {issue_type}** ({severity})")
+                            
+                            if severity == "HIGH":
+                                st.error(msg)
+                            elif severity == "MEDIUM":
+                                st.warning(msg)
+                            else:
+                                st.info(msg)
+                            
+                            if suggestion:
+                                st.success(f"Suggestion: {suggestion}")
+                            st.divider()
+                
+                # SECURITY SCANNER
+                elif tool == "security_scanner":
+                    with st.expander("Security Report", expanded=False):
+                        vulns = raw.get("vulnerabilities", [])
+                        
+                        col1, col2 = st.columns(2)
+                        with col1:
+                            st.metric("Vulnerabilities", len(vulns))
+                        with col2:
+                            st.metric("Risk", raw.get("risk_level", "N/A"))
+                        
+                        for vuln in vulns:
+                            severity = vuln.get("severity", "UNKNOWN")
+                            line = vuln.get("line", "N/A")
+                            vuln_type = vuln.get("type", "Unknown")
+                            desc = vuln.get("description", "")
+                            fix = vuln.get("fix", "")
+                            
+                            st.markdown(f"**Line {line}: {vuln_type}** ({severity})")
+                            st.error(desc)
+                            st.success(f"Fix: {fix}")
+                            st.divider()
+                
+                # CODE EXECUTOR
+                elif tool == "code_executor":
+                    with st.expander("Execution Output", expanded=True):
+                        col1, col2 = st.columns(2)
+                        with col1:
+                            st.metric("Exit Code", raw.get("exit_code", 0))
+                        with col2:
+                            st.metric("Time", raw.get("execution_time", "N/A"))
+                        
+                        output = raw.get("output", "")
+                        error = raw.get("error", "")
+                        
+                        if output:
+                            st.markdown("**Output:**")
+                            st.code(output, language="text")
+                        
+                        if error:
+                            st.markdown("**Errors:**")
+                            st.code(error, language="text")
+                
+                # TEST GENERATOR
+                elif tool == "test_generator":
+                    with st.expander("Test Results", expanded=True):
+                        col1, col2 = st.columns(2)
+                        with col1:
+                            st.metric("Functions", raw.get("functions_found", 0))
+                        with col2:
+                            st.metric("Tests", raw.get("test_cases_generated", 0))
+                        
+                        st.markdown("**Functions:**")
+                        for func in raw.get("functions", []):
+                            st.markdown(f"- `{func}()`")
+                        
+                        st.info(f"File: {raw.get('test_file', 'N/A')}")
+                        st.code(f"pytest {raw.get('test_file', '')} -v", language="bash")
+                
+                # CODE FIXER
+                elif tool == "code_fixer":
+                    with st.expander("Fix Suggestions", expanded=True):
+                        col1, col2 = st.columns(2)
+                        with col1:
+                            st.metric("Issues", raw.get("original_issues", 0))
+                        with col2:
+                            st.metric("Fixes", raw.get("fixes_suggested", 0))
+                        
+                        fixes = raw.get("fixes", [])
+                        for i, fix in enumerate(fixes, 1):
+                            severity = fix.get("severity", "UNKNOWN")
+                            line = fix.get("line", "N/A")
+                            issue_type = fix.get("issue_type", "Unknown")
+                            original_msg = fix.get("original_message", "")
+                            fix_text = fix.get("fix", "")
+                            explanation = fix.get("explanation", "")
+                            code_example = fix.get("code_example", "")
+                            
+                            st.markdown(f"**Fix #{i}: Line {line}** ({severity})")
+                            st.markdown(f"**Issue:** {issue_type}")
+                            st.info(original_msg)
+                            st.success(f"**Solution:** {fix_text}")
+                            st.markdown(f"**Why:** {explanation}")
+                            
+                            if code_example:
+                                st.markdown("**Code Example:**")
+                                st.code(code_example, language="python")
+                            
+                            st.divider()
+            
+            st.caption(f"Tool: {result.get('tool_used', 'N/A')} | Time: {elapsed:.2f}s")
+    
     st.session_state.messages.append({
         "role": "assistant",
-        "content": result['answer'],
-        "tool": result['tool_used'],
-        "response_time": response_time,
-        "raw_output": result['raw_output']
+        "content": result["answer"],
+        "tool": result.get("tool_used"),
+        "raw_output": result.get("raw_output")
     })
 
 # Footer
-st.markdown("---")
-st.caption("🚀 Powered by: Qwen2.5-3B | FAISS | AST Parser | Local CPU | IntelliCode RAG v2.0")
+st.divider()
+st.markdown("**Powered by:** Qwen2.5-3B | FAISS | Python AST | v2.0")

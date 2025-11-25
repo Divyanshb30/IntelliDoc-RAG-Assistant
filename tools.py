@@ -8,9 +8,8 @@ from datetime import datetime
 import subprocess
 import tempfile
 
-
 class DocumentSearchTool:
-    """Tool 1: RAG-based document search (UNCHANGED - keep working)"""
+    """Tool 1: RAG-based document search"""
     
     def __init__(self, rag_pipeline):
         self.rag = rag_pipeline
@@ -19,16 +18,16 @@ class DocumentSearchTool:
         """Search documents and return relevant chunks"""
         try:
             results = self.rag.retrieve(query, top_k=top_k)
-            
             chunks = []
             context = ""
+            
             for i, result in enumerate(results):
                 chunks.append({
                     "chunk_id": i,
-                    "text": result["text"],
-                    "score": result["score"]
+                    "text": result.get("text", ""),
+                    "score": result.get("score", 0)
                 })
-                context += f"\n[Chunk {i+1}]: {result['text']}\n"
+                context += f"\n[Chunk {i+1}]: {result.get('text', '')}\n"
             
             return {
                 "success": True,
@@ -44,162 +43,161 @@ class CodeAnalyzerTool:
     """Tool 2: Advanced Python code analysis with AST"""
     
     def execute(self, code_file_path: str) -> Dict[str, Any]:
-        """Analyze Python code for bugs, complexity, and best practices"""
+        """Analyze Python code for bugs, complexity, and quality"""
         try:
             with open(code_file_path, 'r', encoding='utf-8') as f:
                 code = f.read()
             
-            # Parse AST
             try:
                 tree = ast.parse(code)
             except SyntaxError as e:
-                return {
-                    "success": False,
-                    "error": f"Syntax Error: {e.msg} at line {e.lineno}"
-                }
+                return {"success": False, "error": f"Syntax Error: {e.msg}"}
             
-            # Analyze code
-            issues = self._analyze_ast(tree, code)
-            metrics = self._calculate_metrics(tree, code)
-            suggestions = self._generate_suggestions(issues, metrics)
+            issues = []
+            
+            # Check for common issues
+            issues.extend(self._check_mutable_defaults(tree))
+            issues.extend(self._check_bare_except(tree))
+            issues.extend(self._check_unused_variables(tree))
+            issues.extend(self._check_deep_nesting(tree))
+            issues.extend(self._check_long_functions(tree))
+            
+            # Calculate metrics
+            metrics = self._calculate_metrics(code, tree)
+            
+            # Determine severity
+            high_count = len([i for i in issues if i.get("severity") == "HIGH"])
+            severity = "HIGH" if high_count > 0 else "MEDIUM" if len(issues) > 3 else "LOW"
             
             return {
                 "success": True,
                 "file": os.path.basename(code_file_path),
-                "lines": len(code.split('\n')),
                 "issues": issues,
                 "metrics": metrics,
-                "suggestions": suggestions,
-                "severity": self._calculate_severity(issues)
+                "severity": severity,
+                "total_lines": len(code.split('\n'))
             }
         except Exception as e:
             return {"success": False, "error": str(e)}
     
-    def _analyze_ast(self, tree: ast.AST, code: str) -> List[Dict]:
-        """Analyze AST for common issues"""
+    def _check_mutable_defaults(self, tree: ast.AST) -> List[Dict]:
+        """Check for mutable default arguments"""
         issues = []
-        code_lines = code.split('\n')
-        
         for node in ast.walk(tree):
-            # Check for bare except
+            if isinstance(node, ast.FunctionDef):
+                for default in node.args.defaults:
+                    if isinstance(default, (ast.List, ast.Dict)):
+                        issues.append({
+                            "type": "Mutable default argument",
+                            "severity": "HIGH",
+                            "line": node.lineno,
+                            "message": f"Function '{node.name}' uses mutable default argument",
+                            "suggestion": "Use None as default and initialize inside function"
+                        })
+        return issues
+    
+    def _check_bare_except(self, tree: ast.AST) -> List[Dict]:
+        """Check for bare except clauses"""
+        issues = []
+        for node in ast.walk(tree):
             if isinstance(node, ast.ExceptHandler):
                 if node.type is None:
                     issues.append({
                         "type": "Bare except clause",
-                        "line": node.lineno,
                         "severity": "MEDIUM",
-                        "message": "Using bare 'except:' catches all exceptions including system exits",
-                        "suggestion": "Use 'except Exception:' or specify exception types"
-                    })
-            
-            # Check for unused variables
-            if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store):
-                var_name = node.id
-                if var_name.startswith('_') and not var_name.startswith('__'):
-                    issues.append({
-                        "type": "Potentially unused variable",
                         "line": node.lineno,
-                        "severity": "LOW",
-                        "message": f"Variable '{var_name}' may be unused (starts with _)",
-                        "suggestion": "Remove if truly unused, or rename without underscore"
+                        "message": "Bare 'except:' catches all exceptions",
+                        "suggestion": "Use 'except Exception as e:' instead"
                     })
-            
-            # Check for mutable default arguments
+        return issues
+    
+    def _check_unused_variables(self, tree: ast.AST) -> List[Dict]:
+        """Check for unused variables"""
+        issues = []
+        for node in ast.walk(tree):
             if isinstance(node, ast.FunctionDef):
-                for default in node.args.defaults:
-                    if isinstance(default, (ast.List, ast.Dict, ast.Set)):
+                assigned = set()
+                used = set()
+                
+                for child in ast.walk(node):
+                    if isinstance(child, ast.Assign):
+                        for target in child.targets:
+                            if isinstance(target, ast.Name):
+                                assigned.add(target.id)
+                    elif isinstance(child, ast.Name) and isinstance(child.ctx, ast.Load):
+                        used.add(child.id)
+                
+                unused = assigned - used
+                for var in unused:
+                    if not var.startswith('_'):
                         issues.append({
-                            "type": "Mutable default argument",
+                            "type": "Unused variable",
+                            "severity": "LOW",
                             "line": node.lineno,
-                            "severity": "HIGH",
-                            "message": f"Function '{node.name}' uses mutable default argument",
-                            "suggestion": "Use None as default and create mutable object inside function"
+                            "message": f"Variable '{var}' is assigned but never used",
+                            "suggestion": "Remove unused variable or prefix with underscore"
                         })
-            
-            # Check for long functions
+        return issues
+    
+    def _check_deep_nesting(self, tree: ast.AST) -> List[Dict]:
+        """Check for deep nesting"""
+        issues = []
+        
+        def get_depth(node, depth=0):
+            max_depth = depth
+            for child in ast.iter_child_nodes(node):
+                if isinstance(child, (ast.For, ast.While, ast.If, ast.With)):
+                    child_depth = get_depth(child, depth + 1)
+                    max_depth = max(max_depth, child_depth)
+            return max_depth
+        
+        for node in ast.walk(tree):
+            if isinstance(node, ast.FunctionDef):
+                depth = get_depth(node)
+                if depth >= 4:
+                    issues.append({
+                        "type": "Deep nesting",
+                        "severity": "MEDIUM",
+                        "line": node.lineno,
+                        "message": f"Function '{node.name}' has nesting depth of {depth}",
+                        "suggestion": "Reduce nesting using early returns or guard clauses"
+                    })
+        return issues
+    
+    def _check_long_functions(self, tree: ast.AST) -> List[Dict]:
+        """Check for long functions"""
+        issues = []
+        for node in ast.walk(tree):
             if isinstance(node, ast.FunctionDef):
                 func_lines = node.end_lineno - node.lineno if hasattr(node, 'end_lineno') else 0
                 if func_lines > 50:
                     issues.append({
                         "type": "Long function",
+                        "severity": "LOW",
                         "line": node.lineno,
-                        "severity": "MEDIUM",
                         "message": f"Function '{node.name}' is {func_lines} lines long",
-                        "suggestion": "Consider breaking into smaller functions"
+                        "suggestion": "Break into smaller, single-purpose functions"
                     })
-            
-            # Check for deeply nested code
-            if isinstance(node, (ast.For, ast.While, ast.If)):
-                depth = self._get_nesting_depth(node)
-                if depth > 3:
-                    issues.append({
-                        "type": "Deep nesting",
-                        "line": node.lineno,
-                        "severity": "MEDIUM",
-                        "message": f"Code nested {depth} levels deep",
-                        "suggestion": "Refactor to reduce nesting (early returns, extract functions)"
-                    })
-        
         return issues
     
-    def _get_nesting_depth(self, node: ast.AST, depth: int = 0) -> int:
-        """Calculate nesting depth of control structures"""
-        max_depth = depth
-        for child in ast.iter_child_nodes(node):
-            if isinstance(child, (ast.For, ast.While, ast.If)):
-                child_depth = self._get_nesting_depth(child, depth + 1)
-                max_depth = max(max_depth, child_depth)
-        return max_depth
-    
-    def _calculate_metrics(self, tree: ast.AST, code: str) -> Dict:
+    def _calculate_metrics(self, code: str, tree: ast.AST) -> Dict[str, Any]:
         """Calculate code metrics"""
-        metrics = {
-            "functions": 0,
-            "classes": 0,
-            "imports": 0,
-            "lines_of_code": len([l for l in code.split('\n') if l.strip() and not l.strip().startswith('#')]),
-            "comment_lines": len([l for l in code.split('\n') if l.strip().startswith('#')]),
-            "blank_lines": len([l for l in code.split('\n') if not l.strip()]),
+        lines = code.split('\n')
+        total_lines = len(lines)
+        code_lines = len([l for l in lines if l.strip() and not l.strip().startswith('#')])
+        comment_lines = len([l for l in lines if l.strip().startswith('#')])
+        
+        functions = len([n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef)])
+        classes = len([n for n in ast.walk(tree) if isinstance(n, ast.ClassDef)])
+        
+        return {
+            "total_lines": total_lines,
+            "code_lines": code_lines,
+            "comment_lines": comment_lines,
+            "comment_ratio": (comment_lines / total_lines * 100) if total_lines > 0 else 0,
+            "functions": functions,
+            "classes": classes
         }
-        
-        for node in ast.walk(tree):
-            if isinstance(node, ast.FunctionDef):
-                metrics["functions"] += 1
-            elif isinstance(node, ast.ClassDef):
-                metrics["classes"] += 1
-            elif isinstance(node, (ast.Import, ast.ImportFrom)):
-                metrics["imports"] += 1
-        
-        total_lines = metrics["lines_of_code"] + metrics["comment_lines"] + metrics["blank_lines"]
-        metrics["comment_ratio"] = round(metrics["comment_lines"] / max(total_lines, 1) * 100, 1)
-        
-        return metrics
-    
-    def _generate_suggestions(self, issues: List[Dict], metrics: Dict) -> List[str]:
-        """Generate improvement suggestions"""
-        suggestions = []
-        
-        if metrics["comment_ratio"] < 10:
-            suggestions.append("Consider adding more comments (current: {:.1f}%)".format(metrics["comment_ratio"]))
-        
-        high_severity = len([i for i in issues if i["severity"] == "HIGH"])
-        if high_severity > 0:
-            suggestions.append(f"Fix {high_severity} high-severity issues first")
-        
-        if metrics["functions"] == 0 and metrics["lines_of_code"] > 50:
-            suggestions.append("Consider organizing code into functions")
-        
-        return suggestions
-    
-    def _calculate_severity(self, issues: List[Dict]) -> str:
-        """Calculate overall severity"""
-        if any(i["severity"] == "HIGH" for i in issues):
-            return "HIGH"
-        elif any(i["severity"] == "MEDIUM" for i in issues):
-            return "MEDIUM"
-        elif issues:
-            return "LOW"
-        return "CLEAN"
 
 
 class SecurityScannerTool:
@@ -210,141 +208,162 @@ class SecurityScannerTool:
         try:
             vulnerabilities = []
             
-            # Check for SQL injection
-            if self._check_sql_injection(code):
-                vulnerabilities.append({
-                    "type": "SQL Injection Risk",
-                    "severity": "CRITICAL",
-                    "description": "Potential SQL injection via string formatting",
-                    "pattern": "String concatenation or formatting in SQL queries",
-                    "fix": "Use parameterized queries: cursor.execute('SELECT * FROM users WHERE id = ?', (user_id,))"
-                })
+            # Scan for various security issues
+            vulnerabilities.extend(self._check_hardcoded_secrets(code))
+            vulnerabilities.extend(self._check_sql_injection(code))
+            vulnerabilities.extend(self._check_weak_crypto(code))
+            vulnerabilities.extend(self._check_dangerous_functions(code))
+            vulnerabilities.extend(self._check_insecure_deserialization(code))
             
-            # Check for hardcoded secrets
-            secrets = self._check_hardcoded_secrets(code)
-            if secrets:
-                vulnerabilities.append({
-                    "type": "Hardcoded Credentials",
-                    "severity": "CRITICAL",
-                    "description": f"Found {len(secrets)} hardcoded secrets",
-                    "patterns": secrets,
-                    "fix": "Use environment variables: os.getenv('API_KEY')"
-                })
+            # Determine risk level
+            critical_count = len([v for v in vulnerabilities if v.get("severity") == "CRITICAL"])
+            high_count = len([v for v in vulnerabilities if v.get("severity") == "HIGH"])
             
-            # Check for eval/exec usage
-            if 'eval(' in code or 'exec(' in code:
-                vulnerabilities.append({
-                    "type": "Code Injection Risk",
-                    "severity": "CRITICAL",
-                    "description": "Use of eval() or exec() with user input",
-                    "fix": "Avoid eval/exec entirely, use safe alternatives like ast.literal_eval()"
-                })
-            
-            # Check for pickle usage
-            if 'pickle.load' in code or 'pickle.loads' in code:
-                vulnerabilities.append({
-                    "type": "Insecure Deserialization",
-                    "severity": "HIGH",
-                    "description": "Pickle can execute arbitrary code during deserialization",
-                    "fix": "Use json or msgpack for untrusted data"
-                })
-            
-            # Check for weak cryptography
-            if 'md5' in code.lower() or 'sha1' in code.lower():
-                vulnerabilities.append({
-                    "type": "Weak Cryptography",
-                    "severity": "MEDIUM",
-                    "description": "MD5/SHA1 are cryptographically weak",
-                    "fix": "Use SHA-256 or bcrypt for password hashing"
-                })
-            
-            # Check for open file without context manager
-            if re.search(r'\bopen\s*\([^)]+\)(?!\s*with)', code):
-                vulnerabilities.append({
-                    "type": "Resource Leak",
-                    "severity": "LOW",
-                    "description": "Files opened without context manager may not close properly",
-                    "fix": "Use 'with open() as f:' to ensure file closes"
-                })
-            
-            risk_level = self._calculate_risk_level(vulnerabilities)
+            if critical_count > 0:
+                risk_level = "CRITICAL"
+            elif high_count > 0:
+                risk_level = "HIGH"
+            elif len(vulnerabilities) > 0:
+                risk_level = "MEDIUM"
+            else:
+                risk_level = "LOW"
             
             return {
                 "success": True,
                 "vulnerabilities": vulnerabilities,
-                "total_issues": len(vulnerabilities),
                 "risk_level": risk_level,
-                "scan_timestamp": datetime.now().isoformat()
+                "total_issues": len(vulnerabilities)
             }
         except Exception as e:
             return {"success": False, "error": str(e)}
     
-    def _check_sql_injection(self, code: str) -> bool:
-        """Check for SQL injection patterns"""
-        patterns = [
-            r'execute\s*\([^)]*%[^)]*\)',  # % formatting
-            r'execute\s*\([^)]*\+[^)]*\)',  # + concatenation
-            r'execute\s*\([^)]*f["\'][^"\']*\{',  # f-string
-        ]
-        return any(re.search(pattern, code) for pattern in patterns)
+    def _check_hardcoded_secrets(self, code: str) -> List[Dict]:
+        """Check for hardcoded secrets"""
+        vulnerabilities = []
+        patterns = {
+            r'password\s*=\s*["\'][^"\']+["\']': "Hardcoded password",
+            r'api[_-]?key\s*=\s*["\'][^"\']+["\']': "Hardcoded API key",
+            r'secret[_-]?key\s*=\s*["\'][^"\']+["\']': "Hardcoded secret key",
+            r'token\s*=\s*["\'][^"\']+["\']': "Hardcoded token",
+        }
+        
+        lines = code.split('\n')
+        for line_num, line in enumerate(lines, 1):
+            for pattern, vuln_type in patterns.items():
+                if re.search(pattern, line, re.IGNORECASE):
+                    vulnerabilities.append({
+                        "type": vuln_type,
+                        "severity": "CRITICAL",
+                        "line": line_num,
+                        "description": f"Hardcoded credential detected: {line.strip()[:50]}...",
+                        "fix": "Use environment variables or secure credential management"
+                    })
+        return vulnerabilities
     
-    def _check_hardcoded_secrets(self, code: str) -> List[str]:
-        """Check for hardcoded credentials"""
+    def _check_sql_injection(self, code: str) -> List[Dict]:
+        """Check for SQL injection vulnerabilities"""
+        vulnerabilities = []
         patterns = [
-            r'password\s*=\s*["\'][^"\']+["\']',
-            r'api_key\s*=\s*["\'][^"\']+["\']',
-            r'secret\s*=\s*["\'][^"\']+["\']',
-            r'token\s*=\s*["\'][^"\']+["\']',
-            r'aws_secret_access_key\s*=\s*["\'][^"\']+["\']',
+            r'execute\s*\(\s*["\'].*%s.*["\']',
+            r'execute\s*\(\s*f["\'].*\{.*\}.*["\']',
+            r'execute\s*\(\s*["\'].*\+.*["\']',
         ]
-        found = []
-        for pattern in patterns:
-            matches = re.findall(pattern, code, re.IGNORECASE)
-            found.extend(matches)
-        return found
+        
+        lines = code.split('\n')
+        for line_num, line in enumerate(lines, 1):
+            for pattern in patterns:
+                if re.search(pattern, line):
+                    vulnerabilities.append({
+                        "type": "SQL Injection",
+                        "severity": "CRITICAL",
+                        "line": line_num,
+                        "description": "Potential SQL injection vulnerability detected",
+                        "fix": "Use parameterized queries or ORM"
+                    })
+        return vulnerabilities
     
-    def _calculate_risk_level(self, vulnerabilities: List[Dict]) -> str:
-        """Calculate overall risk level"""
-        if any(v["severity"] == "CRITICAL" for v in vulnerabilities):
-            return "CRITICAL"
-        elif any(v["severity"] == "HIGH" for v in vulnerabilities):
-            return "HIGH"
-        elif any(v["severity"] == "MEDIUM" for v in vulnerabilities):
-            return "MEDIUM"
-        elif vulnerabilities:
-            return "LOW"
-        return "SECURE"
+    def _check_weak_crypto(self, code: str) -> List[Dict]:
+        """Check for weak cryptography"""
+        vulnerabilities = []
+        weak_algorithms = ['md5', 'sha1']
+        
+        lines = code.split('\n')
+        for line_num, line in enumerate(lines, 1):
+            for algo in weak_algorithms:
+                if f'hashlib.{algo}' in line:
+                    vulnerabilities.append({
+                        "type": "Weak Cryptography",
+                        "severity": "HIGH",
+                        "line": line_num,
+                        "description": f"Using weak cryptographic algorithm: {algo.upper()}",
+                        "fix": "Use SHA256 or bcrypt for password hashing"
+                    })
+        return vulnerabilities
+    
+    def _check_dangerous_functions(self, code: str) -> List[Dict]:
+        """Check for dangerous function usage"""
+        vulnerabilities = []
+        dangerous_funcs = {
+            'eval(': ("Code Injection", "Arbitrary code execution via eval()"),
+            'exec(': ("Code Injection", "Arbitrary code execution via exec()"),
+            'os.system(': ("Command Injection", "Shell command injection via os.system()"),
+        }
+        
+        lines = code.split('\n')
+        for line_num, line in enumerate(lines, 1):
+            for func, (vuln_type, desc) in dangerous_funcs.items():
+                if func in line:
+                    vulnerabilities.append({
+                        "type": vuln_type,
+                        "severity": "CRITICAL",
+                        "line": line_num,
+                        "description": desc,
+                        "fix": f"Avoid using {func.strip('(')} with user input"
+                    })
+        return vulnerabilities
+    
+    def _check_insecure_deserialization(self, code: str) -> List[Dict]:
+        """Check for insecure deserialization"""
+        vulnerabilities = []
+        
+        lines = code.split('\n')
+        for line_num, line in enumerate(lines, 1):
+            if 'pickle.loads' in line or 'pickle.load' in line:
+                vulnerabilities.append({
+                    "type": "Insecure Deserialization",
+                    "severity": "HIGH",
+                    "line": line_num,
+                    "description": "Pickle deserialization can execute arbitrary code",
+                    "fix": "Use JSON or safer serialization formats"
+                })
+        return vulnerabilities
 
 
 class SummarizerTool:
-    """Tool 4: Document summarizer (UNCHANGED - keep working)"""
+    """Tool 4: Document summarizer"""
     
     def __init__(self, rag_pipeline):
         self.rag = rag_pipeline
     
-    def execute(self, query: str, style: str = "brief") -> Dict[str, Any]:
-        """Summarize retrieved content"""
+    def execute(self, query: str) -> Dict[str, Any]:
+        """Generate document summary"""
         try:
-            # Retrieve relevant chunks
-            results = self.rag.retrieve(query, top_k=10)
+            results = self.rag.retrieve(query, top_k=5)
             
-            # Combine text
-            full_text = "\n\n".join([r["text"] for r in results])
+            if not results:
+                return {"success": False, "error": "No documents to summarize"}
             
-            # Extract key points (simple extractive summarization)
-            sentences = full_text.split('.')
-            highlights = [s.strip() + '.' for s in sentences if len(s.strip()) > 50][:5]
+            full_text = " ".join([r.get("text", "") for r in results])
+            highlights = [r.get("text", "")[:100] for r in results[:3]]
             
             return {
                 "success": True,
-                "full_text": full_text[:2000],
                 "highlights": highlights,
-                "style": style,
-                "word_count": len(full_text.split())
+                "full_text": full_text[:2000],
+                "num_chunks": len(results)
             }
         except Exception as e:
             return {"success": False, "error": str(e)}
-
 
 
 class TestGeneratorTool:
@@ -356,13 +375,11 @@ class TestGeneratorTool:
             with open(code_file_path, 'r', encoding='utf-8') as f:
                 code = f.read()
             
-            # Parse AST
             try:
                 tree = ast.parse(code)
             except SyntaxError as e:
                 return {"success": False, "error": f"Syntax Error: {e.msg}"}
             
-            # Extract functions
             functions = self._extract_functions(tree)
             
             if not functions:
@@ -371,7 +388,6 @@ class TestGeneratorTool:
                     "error": "No testable functions found in the code"
                 }
             
-            # Generate test code
             test_code = self._generate_test_code(functions, code_file_path)
             test_file_path = self._save_test_file(test_code, code_file_path)
             
@@ -380,36 +396,30 @@ class TestGeneratorTool:
                 "file": os.path.basename(code_file_path),
                 "test_file": test_file_path,
                 "functions_found": len(functions),
-                "test_cases_generated": sum(len(f['test_cases']) for f in functions),
-                "test_code_preview": test_code[:800],  # Preview
-                "functions": [f['name'] for f in functions],
-                "message": f"Generated {len(functions)} test functions covering {sum(len(f['test_cases']) for f in functions)} test cases"
+                "test_cases_generated": sum(len(f.get('test_cases', [])) for f in functions),
+                "test_code_preview": test_code[:800],
+                "functions": [f.get('name', '') for f in functions],
+                "message": f"Generated {len(functions)} test functions"
             }
             
         except Exception as e:
             return {"success": False, "error": str(e)}
     
     def _extract_functions(self, tree: ast.AST) -> List[Dict]:
-        """Extract function signatures and metadata"""
+        """Extract function signatures"""
         functions = []
         
         for node in ast.walk(tree):
             if isinstance(node, ast.FunctionDef):
-                # Skip private/magic functions
                 if node.name.startswith('_'):
                     continue
                 
-                # Extract parameters
                 params = []
                 for arg in node.args.args:
-                    if arg.arg != 'self':  # Skip self parameter
+                    if arg.arg != 'self':
                         param_type = self._infer_type(arg.arg)
-                        params.append({
-                            'name': arg.arg,
-                            'type': param_type
-                        })
+                        params.append({'name': arg.arg, 'type': param_type})
                 
-                # Generate test cases
                 test_cases = self._generate_test_cases(node.name, params)
                 
                 functions.append({
@@ -425,52 +435,30 @@ class TestGeneratorTool:
         """Infer parameter type from name"""
         name_lower = param_name.lower()
         
-        # Check for list/array types first (before numbers)
         if any(x in name_lower for x in ['list', 'items', 'array', 'values', 'numbers']):
             return 'list'
-        # Numeric types
         elif any(x in name_lower for x in ['num', 'count', 'size', 'length', 'age', 'id', 'a', 'b', 'x', 'y']):
             return 'int'
         elif any(x in name_lower for x in ['price', 'rate', 'ratio', 'percent', 'score']):
             return 'float'
-        # String types
         elif any(x in name_lower for x in ['name', 'text', 'message', 'str', 'title', 'word']):
             return 'str'
-        # Dict types
         elif any(x in name_lower for x in ['dict', 'map', 'data', 'config']):
             return 'dict'
-        # Boolean types
         elif any(x in name_lower for x in ['flag', 'is_', 'has_', 'can_', 'should_']):
             return 'bool'
         else:
             return 'Any'
     
     def _generate_test_cases(self, func_name: str, params: List[Dict]) -> List[Dict]:
-        """Generate test cases for a function"""
+        """Generate test cases"""
         test_cases = []
         
-        # Normal case
-        test_cases.append({
-            'name': 'normal',
-            'inputs': self._generate_normal_inputs(params),
-            'type': 'normal'
-        })
+        test_cases.append({'name': 'normal', 'inputs': self._generate_normal_inputs(params), 'type': 'normal'})
         
-        # Edge cases
         if params:
-            # Empty/zero values
-            test_cases.append({
-                'name': 'edge_empty',
-                'inputs': self._generate_empty_inputs(params),
-                'type': 'edge'
-            })
-            
-            # Large values
-            test_cases.append({
-                'name': 'edge_large',
-                'inputs': self._generate_large_inputs(params),
-                'type': 'edge'
-            })
+            test_cases.append({'name': 'edge_empty', 'inputs': self._generate_empty_inputs(params), 'type': 'edge'})
+            test_cases.append({'name': 'edge_large', 'inputs': self._generate_large_inputs(params), 'type': 'edge'})
         
         return test_cases
     
@@ -478,7 +466,7 @@ class TestGeneratorTool:
         """Generate normal test inputs"""
         inputs = {}
         for param in params:
-            param_type = param['type']
+            param_type = param.get('type', 'Any')
             if param_type == 'int':
                 inputs[param['name']] = 5
             elif param_type == 'float':
@@ -496,10 +484,10 @@ class TestGeneratorTool:
         return inputs
     
     def _generate_empty_inputs(self, params: List[Dict]) -> Dict:
-        """Generate empty/zero test inputs"""
+        """Generate empty test inputs"""
         inputs = {}
         for param in params:
-            param_type = param['type']
+            param_type = param.get('type', 'Any')
             if param_type == 'int':
                 inputs[param['name']] = 0
             elif param_type == 'float':
@@ -517,16 +505,16 @@ class TestGeneratorTool:
         return inputs
     
     def _generate_large_inputs(self, params: List[Dict]) -> Dict:
-        """Generate large value test inputs"""
+        """Generate large test inputs"""
         inputs = {}
         for param in params:
-            param_type = param['type']
+            param_type = param.get('type', 'Any')
             if param_type == 'int':
                 inputs[param['name']] = 1000000
             elif param_type == 'float':
                 inputs[param['name']] = 999999.99
             elif param_type == 'str':
-                inputs[param['name']] = "x" * 100  # Changed from 1000 to 100
+                inputs[param['name']] = "x" * 100
             elif param_type == 'list':
                 inputs[param['name']] = list(range(100))
             elif param_type == 'dict':
@@ -544,85 +532,38 @@ class TestGeneratorTool:
         code = f'''"""
 Auto-generated tests for {module_name}.py
 Generated by IntelliCode RAG Assistant on {datetime.now().strftime("%Y-%m-%d %H:%M")}
-
-⚠️ Note: These are template tests. Update assertions with expected values.
 """
 
 import pytest
-from {module_name} import {", ".join([f["name"] for f in functions])}
+from {module_name} import {", ".join([f.get("name", "") for f in functions])}
 
 
 '''
         
         for func in functions:
-            # Normal test
-            code += f'''def test_{func["name"]}_normal():
-    """Test {func["name"]} with normal inputs"""
+            func_name = func.get('name', 'unknown')
+            params = func.get('params', [])
+            test_cases = func.get('test_cases', [])
+            
+            code += f'''def test_{func_name}_normal():
+    """Test {func_name} with normal inputs"""
 '''
-            if func['params']:
-                inputs_str = ", ".join([f"{p['name']}={repr(func['test_cases'][0]['inputs'][p['name']])}" 
-                                       for p in func['params']])
-                code += f'''    result = {func["name"]}({inputs_str})
-    assert result is not None  # TODO: Add specific assertion
-    print(f"Normal test passed: {{result}}")
+            if params and test_cases:
+                inputs_str = ", ".join([f"{p['name']}={repr(test_cases[0]['inputs'][p['name']])}" 
+                                       for p in params])
+                code += f'''    result = {func_name}({inputs_str})
+    assert result is not None
 
 
 '''
             else:
-                code += f'''    result = {func["name"]}()
-    assert result is not None  # TODO: Add specific assertion
+                code += f'''    result = {func_name}()
+    assert result is not None
 
 
 '''
-            
-            # Edge case - empty inputs
-            if len(func['test_cases']) > 1 and func['params']:
-                code += f'''def test_{func["name"]}_edge_empty():
-    """Test {func["name"]} with empty/zero inputs"""
-'''
-                empty_inputs = ", ".join([f"{p['name']}={repr(func['test_cases'][1]['inputs'][p['name']])}"
-                                         for p in func['params']])
-                code += f'''    # May raise exception - adjust as needed
-    result = {func["name"]}({empty_inputs})
-    # TODO: Add assertions based on expected behavior
-
-
-'''
-            
-            # Edge case - large inputs
-            if len(func['test_cases']) > 2 and func['params']:
-                code += f'''def test_{func["name"]}_edge_large():
-    """Test {func["name"]} with large inputs"""
-'''
-                large_inputs = ", ".join([f"{p['name']}={repr(func['test_cases'][2]['inputs'][p['name']])}"
-                                         for p in func['params']])
-                code += f'''    result = {func["name"]}({large_inputs})
-    # TODO: Add assertions for large input handling
-
-
-'''
-            
-            # Parametrized test template
-            if func['params']:
-                param_names = [p['name'] for p in func['params']]
-            
-                code += f'''@pytest.mark.parametrize("{','.join(param_names)},expected", [
-    # TODO: Add test cases here
-    # Example test cases:
-    # (normal_values..., expected_output),
-    # (edge_case_values..., expected_output),
-])
-def test_{func["name"]}_parametrized({', '.join(param_names)}, expected):
-    """Parametrized tests for {func["name"]}"""
-    result = {func["name"]}({', '.join(param_names)})
-    assert result == expected
-
-
-'''
-    
-        code += '''
-# Run tests with: pytest -v test_*.py
-'''
+        
+        code += '# Run tests with: pytest -v test_*.py\n'
         return code
     
     def _save_test_file(self, test_code: str, original_file: str) -> str:
@@ -640,18 +581,17 @@ def test_{func["name"]}_parametrized({', '.join(param_names)}, expected):
 
 
 class CodeExecutionTool:
-    """Tool 6: Safe Python code execution in isolated subprocess"""
+    """Tool 6: Safe Python code execution"""
     
     def __init__(self, timeout: int = 5):
         self.timeout = timeout
-        self.max_output_size = 5000  # Limit output size
+        self.max_output_size = 5000
     
     def execute(self, code: str, timeout: int = None) -> Dict[str, Any]:
-        """Execute Python code safely in subprocess"""
+        """Execute Python code safely"""
         timeout = timeout or self.timeout
         
         try:
-            # Create temporary file
             with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False, encoding='utf-8') as f:
                 f.write(code)
                 temp_file = f.name
@@ -659,20 +599,18 @@ class CodeExecutionTool:
             start_time = datetime.now()
             
             try:
-                # Execute in subprocess with timeout
                 result = subprocess.run(
                     ['python', temp_file],
                     capture_output=True,
                     text=True,
                     timeout=timeout,
-                    cwd=tempfile.gettempdir(),  # Isolate working directory
-                    env={'PYTHONIOENCODING': 'utf-8'}  # Ensure UTF-8 encoding
+                    cwd=tempfile.gettempdir(),
+                    env={'PYTHONIOENCODING': 'utf-8'}
                 )
                 
                 end_time = datetime.now()
                 execution_time = (end_time - start_time).total_seconds()
                 
-                # Limit output size
                 stdout = result.stdout[:self.max_output_size]
                 stderr = result.stderr[:self.max_output_size]
                 
@@ -695,7 +633,7 @@ class CodeExecutionTool:
                 return {
                     "success": False,
                     "output": "",
-                    "error": f"⏱️ Execution timeout after {timeout} seconds. Code may have infinite loop or is too slow.",
+                    "error": f"Execution timeout after {timeout} seconds",
                     "exit_code": -1,
                     "execution_time": f"{timeout}s (timeout)",
                     "timeout": True,
@@ -703,22 +641,139 @@ class CodeExecutionTool:
                 }
             
             finally:
-                # Cleanup temporary file
                 try:
                     os.unlink(temp_file)
-                except Exception as cleanup_error:
-                    print(f"Cleanup error: {cleanup_error}")
+                except:
+                    pass
         
         except Exception as e:
             return {
                 "success": False,
-                "error": f"Execution error: {str(e)}",
+                "error": str(e),
                 "output": "",
                 "exit_code": -1,
                 "execution_time": "0s",
                 "timeout": False,
-                "message": f"Failed to execute code: {str(e)}"
+                "message": f"Failed to execute: {str(e)}"
             }
+
+
+class CodeFixerTool:
+    """Tool 7: Code fix suggestions"""
+    
+    def execute(self, code_file_path: str) -> Dict[str, Any]:
+        """Analyze code and suggest fixes"""
+        try:
+            analyzer = CodeAnalyzerTool()
+            analysis = analyzer.execute(code_file_path)
+            
+            if not analysis.get("success"):
+                return analysis
+            
+            issues = analysis.get("issues", [])
+            
+            if not issues:
+                return {
+                    "success": True,
+                    "message": "No issues found - code looks good!",
+                    "fixes_suggested": 0,
+                    "issues": [],
+                    "original_issues": 0
+                }
+            
+            fixes = []
+            for issue in issues[:10]:
+                fix_suggestion = self._generate_fix_suggestion(issue)
+                if fix_suggestion:
+                    fixes.append(fix_suggestion)
+            
+            return {
+                "success": True,
+                "message": f"Generated {len(fixes)} fix suggestions for {len(issues)} issues",
+                "fixes_suggested": len(fixes),
+                "original_issues": len(issues),
+                "fixes": fixes,
+                "severity": analysis.get("severity", "UNKNOWN")
+            }
+            
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+    
+    def _generate_fix_suggestion(self, issue: Dict) -> Dict[str, Any]:
+        """Generate fix suggestion"""
+        issue_type = issue.get('type', '').lower()
+        line = issue.get('line', 0)
+        message = issue.get('message', '')
+        
+        suggestion = {
+            'issue_type': issue.get('type', 'Unknown'),
+            'line': line,
+            'severity': issue.get('severity', 'UNKNOWN'),
+            'original_message': message,
+            'fix': '',
+            'explanation': '',
+            'code_example': ''
+        }
+        
+        if 'mutable default' in issue_type:
+            suggestion['fix'] = "Replace mutable default (list/dict) with None"
+            suggestion['explanation'] = "Mutable defaults are shared across function calls."
+            suggestion['code_example'] = """# Before:
+def function(items=[]):
+    items.append(x)
+
+# After:
+def function(items=None):
+    if items is None:
+        items = []
+    items.append(x)"""
+        
+        elif 'bare except' in issue_type:
+            suggestion['fix'] = "Replace 'except:' with 'except Exception as e:'"
+            suggestion['explanation'] = "Bare except catches all exceptions including system exits."
+            suggestion['code_example'] = """# Before:
+try:
+    operation()
+except:
+    handle_error()
+
+# After:
+try:
+    operation()
+except Exception as e:
+    print(f"Error: {e}")
+    handle_error()"""
+        
+        elif 'unused variable' in issue_type:
+            suggestion['fix'] = "Remove unused variable or prefix with underscore"
+            suggestion['explanation'] = "Unused variables clutter code."
+            suggestion['code_example'] = """# Before:
+unused_var = calculate()
+
+# After:
+_unused_var = calculate()  # or remove"""
+        
+        elif 'deep nesting' in issue_type:
+            suggestion['fix'] = "Reduce nesting using early returns"
+            suggestion['explanation'] = "Deep nesting makes code hard to read."
+            suggestion['code_example'] = """# Before:
+if condition1:
+    if condition2:
+        do_something()
+
+# After:
+if not condition1:
+    return
+if not condition2:
+    return
+do_something()"""
+        
+        else:
+            suggestion['fix'] = f"Review and fix: {message}"
+            suggestion['explanation'] = issue.get('suggestion', 'Review the code.')
+            suggestion['code_example'] = "# See issue details"
+        
+        return suggestion
 
 
 def get_tools(rag_pipeline):
@@ -728,7 +783,7 @@ def get_tools(rag_pipeline):
         "code_analyzer": CodeAnalyzerTool(),
         "security_scanner": SecurityScannerTool(),
         "summarizer": SummarizerTool(rag_pipeline),
-        "test_generator": TestGeneratorTool(),      # NEW
-        "code_executor": CodeExecutionTool()        # NEW
+        "test_generator": TestGeneratorTool(),
+        "code_executor": CodeExecutionTool(),
+        "code_fixer": CodeFixerTool()
     }
-
