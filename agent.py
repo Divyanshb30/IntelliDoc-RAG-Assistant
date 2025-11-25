@@ -1,7 +1,6 @@
 from llama_cpp import Llama
-from typing import Dict, Any, List  # ADD List here!
+from typing import Dict, Any, List
 import json
-
 
 class RAGAgent:
     """AI Agent with intent detection and tool routing"""
@@ -14,14 +13,24 @@ class RAGAgent:
         """Detect which tool to use based on query and context"""
         query_lower = query.lower()
         
-        # Security scanning (HIGHEST PRIORITY for security-related queries)
-        if any(word in query_lower for word in ["security", "vulnerability", "vulnerabilities", "secure", "exploit", "injection", "hack", "threat", "risk"]):
+        # Code execution (HIGHEST PRIORITY for explicit run commands)
+        if any(phrase in query_lower for phrase in ["run this", "execute this", "run the code", "execute the code", "run code", "execute code"]):
+            if file_context and file_context.get('type') == 'code':
+                return "code_executor"
+        
+        # Security scanning (HIGH PRIORITY for security-related queries)
+        if any(word in query_lower for word in ["security", "vulnerability", "vulnerabilities", "secure", "exploit", "injection", "hack", "threat", "risk", "scan security"]):
             if file_context and file_context.get('type') == 'code':
                 return "security_scanner"
         
-        # Code analysis (for general code quality, bugs, issues)
+        # Test generation (MEDIUM PRIORITY - specific phrases only, no generic "test")
+        if any(phrase in query_lower for phrase in ["generate test", "create test", "write test", "make test", "pytest", "unit test", "test case", "test generation", "test file"]):
+            if file_context and file_context.get('type') == 'code':
+                return "test_generator"
+        
+        # Code analysis (MEDIUM PRIORITY - for general code quality)
         if file_context and file_context.get('type') == 'code':
-            if any(word in query_lower for word in ["analyze", "check", "review", "find bugs", "issues", "quality", "problems"]):
+            if any(word in query_lower for word in ["analyze", "analyse", "check", "review", "find bugs", "issues", "quality", "problems", "lint", "inspect", "find issues"]):
                 return "code_analyzer"
         
         # Document operations
@@ -34,7 +43,6 @@ class RAGAgent:
     
     def execute(self, query: str, file_context: Dict = None) -> Dict[str, Any]:
         """Execute query through appropriate tool"""
-        
         # Detect intent
         tool_name = self.detect_intent(query, file_context)
         
@@ -47,6 +55,12 @@ class RAGAgent:
         if tool_name == "code_analyzer" and file_context:
             tool_output = tool.execute(file_context['path'])
         elif tool_name == "security_scanner" and file_context:
+            with open(file_context['path'], 'r') as f:
+                code = f.read()
+            tool_output = tool.execute(code)
+        elif tool_name == "test_generator" and file_context:  # NEW
+            tool_output = tool.execute(file_context['path'])
+        elif tool_name == "code_executor" and file_context:  # NEW
             with open(file_context['path'], 'r') as f:
                 code = f.read()
             tool_output = tool.execute(code)
@@ -71,6 +85,45 @@ class RAGAgent:
     def _generate_answer(self, query: str, tool_output: Dict, tool_name: str) -> str:
         """Generate natural language answer from tool output"""
         
+        # ===== TEMPLATE-BASED RESPONSES (No LLM - Fast & Clean) =====
+        
+        if tool_name == "test_generator":
+            functions_found = tool_output.get("functions_found", 0)
+            test_cases = tool_output.get("test_cases_generated", 0)
+            test_file = tool_output.get("test_file", "")
+            funcs = tool_output.get("functions", [])
+            
+            # Create concise function list
+            if len(funcs) <= 3:
+                func_list = ', '.join(funcs)
+            else:
+                func_list = f"{', '.join(funcs[:3])} and {len(funcs) - 3} more"
+            
+            return f"✅ **Test Generation Complete**\n\n• Functions tested: {func_list}\n• Total test cases: {test_cases} (normal, edge cases, parametrized)\n• File saved: `{test_file}`\n• Run with: `pytest {test_file} -v`"
+        
+        elif tool_name == "code_executor":
+            output = tool_output.get("output", "")
+            error = tool_output.get("error", "")
+            exec_time = tool_output.get("execution_time", "")
+            exit_code = tool_output.get("exit_code", 0)
+            timeout = tool_output.get("timeout", False)
+            
+            if timeout:
+                return f"⏱️ **Execution Timeout**\n\nCode execution exceeded {exec_time}. Possible causes:\n• Infinite loop\n• Heavy computation\n• Long-running operations\n\nConsider optimizing or breaking into smaller parts."
+            
+            if exit_code == 0:
+                output_display = output.strip() if output.strip() else "(no output)"
+                if len(output_display) > 400:
+                    output_display = output_display[:400] + "\n... (truncated)"
+                return f"✅ **Execution Successful** ({exec_time})\n\n``````"
+            else:
+                error_display = error.strip() if error.strip() else "Unknown error"
+                if len(error_display) > 400:
+                    error_display = error_display[:400] + "\n... (truncated)"
+                return f"❌ **Execution Failed** (exit code {exit_code}, {exec_time})\n\n``````"
+        
+        # ===== LLM-BASED RESPONSES (For Analysis Tools) =====
+        
         if tool_name == "code_analyzer":
             issues = tool_output.get("issues", [])
             metrics = tool_output.get("metrics", {})
@@ -80,21 +133,18 @@ class RAGAgent:
             medium = len([i for i in issues if i["severity"] == "MEDIUM"])
             low = len([i for i in issues if i["severity"] == "LOW"])
             
-            # Get top 2 issues
+            # Get top 2 critical issues
             top_issues = sorted(issues, key=lambda x: {"HIGH": 3, "MEDIUM": 2, "LOW": 1}.get(x["severity"], 0), reverse=True)[:2]
-            issues_text = "\n".join([f"- Line {i['line']}: {i['type']}" for i in top_issues])
+            issues_summary = ", ".join([f"{i['type']} (line {i['line']})" for i in top_issues]) if top_issues else "None"
             
-            prompt = f"""You are a code analyzer. Write ONLY a direct 2-3 sentence summary. Do not simulate conversations or include "Assistant:" or "Human:".
+            prompt = f"""Write a concise 2-sentence code quality summary. Be direct and specific.
 
-Analysis Results:
-- Total Issues: {len(issues)} ({high} HIGH, {medium} MEDIUM, {low} LOW)
-- Overall Severity: {severity}
-- Comment Coverage: {metrics.get('comment_ratio', 0):.1f}%
+Issues: {len(issues)} total ({high} high, {medium} medium, {low} low)
+Severity: {severity}
+Top problems: {issues_summary}
+Code quality: {metrics.get('comment_ratio', 0):.0f}% commented
 
-Top Issues Found:
-{issues_text}
-
-Write a direct, professional summary starting with "The code contains" or "Analysis found":"""
+Summary:"""
 
         elif tool_name == "security_scanner":
             vulnerabilities = tool_output.get("vulnerabilities", [])
@@ -102,91 +152,90 @@ Write a direct, professional summary starting with "The code contains" or "Analy
             
             critical = len([v for v in vulnerabilities if v["severity"] == "CRITICAL"])
             high = len([v for v in vulnerabilities if v["severity"] == "HIGH"])
+            medium = len([v for v in vulnerabilities if v["severity"] == "MEDIUM"])
             
-            top_vulns = vulnerabilities[:2]
-            vulns_text = "\n".join([f"- {v['type']}" for v in top_vulns])
+            # Get top 2 critical vulnerabilities
+            top_vulns = [v for v in vulnerabilities if v["severity"] in ["CRITICAL", "HIGH"]][:2]
+            vuln_summary = ", ".join([v['type'] for v in top_vulns]) if top_vulns else "None critical"
             
-            prompt = f"""You are a security scanner. Write ONLY a direct 2-3 sentence security assessment. Do not simulate conversations.
+            prompt = f"""Write a concise 2-sentence security assessment. Be direct and specific.
 
-Scan Results:
-- Risk Level: {risk_level}
-- Total Vulnerabilities: {len(vulnerabilities)} ({critical} CRITICAL, {high} HIGH)
+Risk: {risk_level}
+Vulnerabilities: {len(vulnerabilities)} total ({critical} critical, {high} high, {medium} medium)
+Critical issues: {vuln_summary}
 
-Critical Findings:
-{vulns_text}
-
-Write a direct assessment starting with "Security scan detected" or "Analysis identified":"""
+Assessment:"""
 
         elif tool_name == "document_search":
-            context = tool_output.get("context", "")[:1200]
-            prompt = f"""Answer this question directly in 2-3 sentences using the context below. Do not include "Assistant:" or simulate conversations.
+            chunks = tool_output.get("chunks", [])
+            if not chunks:
+                return "No relevant information found in the documents."
+            
+            # Get most relevant chunk
+            context = chunks[0].get("text", "")[:1000]
+            
+            prompt = f"""Answer in 2-3 concise sentences using only the context below. Be direct.
 
 Question: {query}
 
-Context:
-{context}
+Context: {context}
 
-Direct answer:"""
+Answer:"""
 
         else:  # summarizer
-            text = tool_output.get("full_text", "")[:1200]
-            prompt = f"""Summarize this text directly in 3-4 sentences. Do not simulate conversations.
+            highlights = tool_output.get("highlights", [])
+            if highlights:
+                return "**Key Points:**\n" + "\n".join([f"• {h}" for h in highlights[:5]])
+            
+            text = tool_output.get("full_text", "")[:1000]
+            prompt = f"""Summarize in 3 bullet points. Be concise.
 
-Text:
-{text}
+Text: {text}
 
 Summary:"""
-    
-        # Generate response
+
+        # Generate LLM response with strict constraints
         try:
             response = self.llm(
                 prompt,
-                max_tokens=512,
-                temperature=0.7,
-                stop=["Question:", "\n\n\n\n", "Human:", "Assistant:", "Context:"]  # Stop on conversation markers
+                max_tokens=200,  # Reduced from 512 for conciseness
+                temperature=0.5,  # Lower temperature for more focused output
+                top_p=0.9,
+                stop=["Question:", "\n\n\n", "Human:", "Assistant:", "Context:", "Text:", "Summary:", "Assessment:", "Answer:"],
+                repeat_penalty=1.2  # Prevent repetition
             )
             
             answer = response['choices'][0]['text'].strip()
             
-            # Remove any conversational prefixes
-            for prefix in ["Assistant:", "Human:", "AI:", "Response:"]:
-                if answer.startswith(prefix):
+            # Aggressive cleaning
+            for prefix in ["Assistant:", "Human:", "AI:", "Response:", "Direct answer:", "Summary:", "Assessment:", "Answer:"]:
+                if answer.lower().startswith(prefix.lower()):
                     answer = answer[len(prefix):].strip()
             
-            # Clean trailing incomplete sentences
+            # Remove leading dashes or bullets
+            answer = answer.lstrip('•-– ')
+            
+            # Ensure it ends with punctuation
             if answer and answer[-1] not in '.!?':
                 last_period = max(answer.rfind('.'), answer.rfind('!'), answer.rfind('?'))
-                if last_period > 0:
+                if last_period > 50:  # Keep if we have a reasonable sentence
                     answer = answer[:last_period + 1]
+                else:
+                    answer += "."
             
-            # Fallback if too short
-            if len(answer) < 30:
+            # Fallback if response is too verbose or short
+            if len(answer) > 500 or len(answer) < 20:
                 return self._fallback_answer(tool_output, tool_name)
             
             return answer
             
         except Exception as e:
-            print(f"LLM error: {e}")
+            print(f"LLM generation error: {e}")
             return self._fallback_answer(tool_output, tool_name)
-
-
-    
-    def _format_issues(self, issues: List[Dict]) -> str:
-        """Format issues for prompt"""
-        formatted = []
-        for issue in issues:
-            formatted.append(f"- Line {issue['line']}: {issue['type']} ({issue['severity']})")
-        return "\n".join(formatted) if formatted else "None"
-    
-    def _format_vulnerabilities(self, vulns: List[Dict]) -> str:
-        """Format vulnerabilities for prompt"""
-        formatted = []
-        for vuln in vulns:
-            formatted.append(f"- {vuln['type']}: {vuln['description']}")
-        return "\n".join(formatted) if formatted else "None found"
     
     def _fallback_answer(self, tool_output: Dict, tool_name: str) -> str:
         """Fallback template-based answer when LLM fails"""
+        
         if tool_name == "code_analyzer":
             issues = tool_output.get("issues", [])
             metrics = tool_output.get("metrics", {})
@@ -196,7 +245,7 @@ Summary:"""
             medium = len([i for i in issues if i["severity"] == "MEDIUM"])
             low = len([i for i in issues if i["severity"] == "LOW"])
             
-            return f"Code analysis complete. Found {len(issues)} issues (Severity: {severity}). Breakdown: {high} high, {medium} medium, {low} low. Comment ratio: {metrics.get('comment_ratio', 0):.1f}%. See details below for specific issues and recommendations."
+            return f"**Code Analysis:** Found {len(issues)} issues (Severity: {severity}). {high} high priority, {medium} medium, {low} low. Code has {metrics.get('comment_ratio', 0):.1f}% comment coverage. Review detailed findings below."
         
         elif tool_name == "security_scanner":
             vulns = tool_output.get("vulnerabilities", [])
@@ -205,17 +254,31 @@ Summary:"""
             critical = len([v for v in vulns if v["severity"] == "CRITICAL"])
             high = len([v for v in vulns if v["severity"] == "HIGH"])
             
-            return f"Security scan complete. Risk Level: {risk}. Found {len(vulns)} vulnerabilities ({critical} critical, {high} high severity). Review the detailed report below for specific vulnerabilities and recommended fixes."
+            return f"**Security Scan:** Risk level {risk}. Detected {len(vulns)} vulnerabilities: {critical} critical, {high} high severity. Immediate attention required for critical issues."
+        
+        elif tool_name == "test_generator":
+            functions_found = tool_output.get("functions_found", 0)
+            test_file = tool_output.get("test_file", "")
+            
+            return f"**Tests Generated:** Created {functions_found} test functions in `{test_file}`. Run with: `pytest {test_file} -v`"
+        
+        elif tool_name == "code_executor":
+            output = tool_output.get("output", "")[:200]
+            exit_code = tool_output.get("exit_code", 0)
+            
+            if exit_code == 0:
+                return f"**Execution Success:** Code ran successfully.\n\n``````"
+            else:
+                return f"**Execution Failed:** Exit code {exit_code}. Check error details below."
         
         elif tool_name == "document_search":
             chunks = tool_output.get("chunks", [])
             if chunks:
-                return chunks[0].get("text", "No information found.")[:250] + "..."
-            return "No relevant information found in documents."
+                return chunks[0].get("text", "")[:300] + "..."
+            return "No relevant information found."
         
         else:  # summarizer
             highlights = tool_output.get("highlights", [])
             if highlights:
-                return " ".join(highlights[:3])
-            return "Unable to generate summary."
-
+                return "**Key Points:**\n" + "\n".join([f"• {h}" for h in highlights[:4]])
+            return "Unable to generate summary from provided content."
