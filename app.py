@@ -210,4 +210,5 @@ with gr.Blocks(title="IntelliCode RAG Assistant", theme=gr.themes.Soft()) as dem
     btn_explain.click(lambda h, m: quick_action("Explain this code", h, m), inputs=[chatbot, mode], outputs=[chatbot, msg])
 
 if __name__ == "__main__":
-    demo.launch()
+    demo.launch(server_name="0.0.0.0", server_port=7860)
+
