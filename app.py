@@ -8,6 +8,15 @@ import os
 import pypdf
 import spaces  # required for ZeroGPU
 
+# Patch gradio 4.44.0 bool schema bug
+import gradio_client.utils as _gcu
+_original_get_type = _gcu.get_type
+def _patched_get_type(schema):
+    if isinstance(schema, bool):
+        return "bool"
+    return _original_get_type(schema)
+_gcu.get_type = _patched_get_type
+
 # ── Global state ──────────────────────────────────────────────────────────────
 rag = RAGPipeline()
 tools = get_tools(rag)
@@ -210,6 +219,6 @@ with gr.Blocks(title="IntelliCode RAG Assistant", theme=gr.themes.Soft()) as dem
     btn_explain.click(lambda h, m: quick_action("Explain this code", h, m), inputs=[chatbot, mode], outputs=[chatbot, msg])
 
 if __name__ == "__main__":
-    demo.launch(server_name="0.0.0.0", server_port=7860, show_api=False)
+    demo.launch()
 
 
