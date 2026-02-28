@@ -1,4 +1,5 @@
-streamlit==1.40.0
+gradio==4.44.0
+spaces
 transformers==4.38.2
 accelerate==0.27.2
 torch==2.2.0
