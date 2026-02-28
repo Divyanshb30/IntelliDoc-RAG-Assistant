@@ -1,4 +1,3 @@
-gradio==4.44.1
 spaces
 transformers==4.38.2
 accelerate==0.27.2
