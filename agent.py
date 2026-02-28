@@ -1,13 +1,31 @@
-from llama_cpp import Llama
+import torch
 from typing import Dict, Any, List
 import json
 
 class RAGAgent:
     """AI Agent with intent detection and tool routing"""
     
-    def __init__(self, llm: Llama, tools: Dict):
+    def __init__(self, llm: Dict, tools: Dict):
         self.llm = llm
         self.tools = tools
+
+    def _call_llm(self, prompt: str, max_new_tokens: int = 150) -> str:
+        tokenizer = self.llm["tokenizer"]
+        model = self.llm["model"]
+        inputs = tokenizer(prompt, return_tensors="pt").to(model.device)
+        with torch.no_grad():
+            outputs = model.generate(
+                **inputs,
+                max_new_tokens=max_new_tokens,
+                temperature=0.3,
+                do_sample=True,
+                pad_token_id=tokenizer.eos_token_id
+            )
+        decoded = tokenizer.decode(
+            outputs[0][inputs["input_ids"].shape[1]:],
+            skip_special_tokens=True
+        ).strip()
+        return decoded
     
     def detect_intent(self, query: str, file_context: Dict = None) -> str:
         """Detect which tool to use based on query and context"""
@@ -221,16 +239,7 @@ INFORMATION:
 ANSWER (write 2-3 complete sentences stating facts only):"""
 
             try:
-                response = self.llm(
-                    prompt,
-                    max_tokens=120,
-                    temperature=0.2,  # Very low for factual
-                    top_p=0.8,
-                    stop=["\n\nQUESTION:", "\nQUESTION:", "INFORMATION:", "\n\n\n", "1.", "2.", "3.", "###", "Question:", "question:"],
-                    repeat_penalty=1.5  # High penalty to prevent repetition
-                )
-                
-                answer = response['choices'][0]['text'].strip()
+                answer = self._call_llm(prompt, max_new_tokens=150)
                 
                 # Clean answer
                 for prefix in ["ANSWER:", "Answer:", "Direct Answer:", "Response:", "Based on", "According to"]:
@@ -279,16 +288,7 @@ Summary:"""
 
         # Generate LLM response
         try:
-            response = self.llm(
-                prompt,
-                max_tokens=200,
-                temperature=0.5,
-                top_p=0.9,
-                stop=["Question:", "\n\n\n", "Human:", "Assistant:", "Context:", "Text:", "Summary:", "Assessment:", "Answer:"],
-                repeat_penalty=1.2
-            )
-            
-            answer = response['choices'][0]['text'].strip()
+            answer = self._call_llm(prompt, max_new_tokens=150)
             
             # Clean prefixes
             for prefix in ["Assistant:", "Human:", "AI:", "Response:", "Answer:", "Summary:", "Assessment:"]:

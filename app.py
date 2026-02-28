@@ -1,5 +1,6 @@
 import streamlit as st
-from llama_cpp import Llama
+from transformers import AutoModelForCausalLM, AutoTokenizer
+import torch
 from rag import RAGPipeline
 from tools import get_tools
 from agent import RAGAgent
@@ -168,22 +169,22 @@ st.markdown('<p class="sub-header">AI-powered code analysis and documentation</p
 
 # Initialize agent
 if st.session_state.agent is None:
-    with st.spinner("Loading AI model..."):
+    with st.spinner("Loading Qwen2.5-3B model from HuggingFace Hub..."):
         try:
-            llm = Llama(
-                model_path="models/qwen2.5-3b-instruct-q4_k_m.gguf",
-                n_ctx=4096,
-                n_threads=8,
-                verbose=False
+            MODEL_ID = "Qwen/Qwen2.5-3B-Instruct"
+            tokenizer = AutoTokenizer.from_pretrained(MODEL_ID, trust_remote_code=True)
+            model = AutoModelForCausalLM.from_pretrained(
+                MODEL_ID,
+                torch_dtype=torch.float16,
+                device_map="auto",
+                trust_remote_code=True
             )
-            
+            llm = {"model": model, "tokenizer": tokenizer}
             if st.session_state.rag is None:
                 st.session_state.rag = RAGPipeline()
-            
             tools = get_tools(st.session_state.rag)
             st.session_state.agent = RAGAgent(llm, tools)
-            st.success("Model loaded")
-            
+            st.success("Qwen2.5-3B loaded")
         except Exception as e:
             st.error(f"Failed to load model: {e}")
             st.stop()
