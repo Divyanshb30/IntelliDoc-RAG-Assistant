@@ -10,12 +10,12 @@ import spaces  # required for ZeroGPU
 
 # Patch gradio 4.44.0 bool schema bug
 import gradio_client.utils as _gcu
-_original_get_type = _gcu.get_type
-def _patched_get_type(schema):
+_orig = _gcu._json_schema_to_python_type
+def _patched(schema, defs=None):
     if isinstance(schema, bool):
-        return "bool"
-    return _original_get_type(schema)
-_gcu.get_type = _patched_get_type
+        return "any"
+    return _orig(schema, defs)
+_gcu._json_schema_to_python_type = _patched
 
 # ── Global state ──────────────────────────────────────────────────────────────
 rag = RAGPipeline()
