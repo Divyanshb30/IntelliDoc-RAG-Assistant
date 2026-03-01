@@ -137,7 +137,7 @@ def quick_action(action, history, mode):
 
 # ── UI ────────────────────────────────────────────────────────────────────────
 with gr.Blocks(title="IntelliCode RAG Assistant", theme=gr.themes.Soft()) as demo:
-    gr.Markdown("# 🧠 IntelliCode RAG Assistant\n* AI for code analysis & document Q&A — Qwen2.5-3B | FAISS | Python AST*")
+    gr.Markdown("# IntelliCode RAG Assistant\n* AI for code analysis & document Q&A — Qwen2.5-3B | FAISS | Python AST*")
 
     with gr.Row():
         # ── Left sidebar ──
