@@ -1,0 +1,54 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  lint:
+    name: Lint (ruff)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install ruff
+        run: pip install ruff
+      - name: Lint
+        run: ruff check src/ tests/ eval/ app.py
+
+  test:
+    name: Tests + eval gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      # Cache HuggingFace model downloads (embedding + cross-encoder) across runs.
+      - name: Cache HuggingFace models
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/huggingface
+          key: hf-models-${{ runner.os }}-v1
+
+      # Install the CPU-only torch build first so the eval never pulls the
+      # multi-GB CUDA wheel — CI runs entirely on CPU.
+      - name: Install CPU torch
+        run: pip install torch --index-url https://download.pytorch.org/whl/cpu
+
+      - name: Install package
+        run: pip install -e ".[dev,eval]"
+
+      - name: Unit + integration tests
+        run: pytest tests/unit/ tests/integration/ -v --tb=short
+
+      - name: Evaluation quality gate
+        run: pytest tests/eval/ -v --tb=short
+
+      - name: Coverage report
+        run: pytest tests/ --cov=intellicode --cov-report=term-missing -q
