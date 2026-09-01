@@ -1,0 +1,40 @@
+{
+  "description": "Labeled retrieval evaluation set for the TechCorp corpus. A retrieved chunk counts as relevant if its text contains at least one of the answer_spans (case-insensitive substring match). Negative queries have no answer in the corpus.",
+  "corpus_dir": "tests/fixtures/documents",
+  "queries": [
+    {"id": "f01", "category": "factual", "query": "What products does TechCorp offer?", "answer_spans": ["CloudSync Pro", "AI Assistant Platform", "DataViz Suite"], "source_doc": "company_overview.txt"},
+    {"id": "f02", "category": "factual", "query": "When was TechCorp founded?", "answer_spans": ["founded in 2010"], "source_doc": "company_overview.txt"},
+    {"id": "f03", "category": "factual", "query": "How is data encrypted at rest in CloudSync Pro?", "answer_spans": ["AES-256"], "source_doc": "cloudsync_product.txt"},
+    {"id": "f04", "category": "factual", "query": "What is the API rate limit for standard accounts?", "answer_spans": ["1000 requests per minute"], "source_doc": "api_reference.txt"},
+    {"id": "f05", "category": "factual", "query": "What is the primary database used at TechCorp?", "answer_spans": ["PostgreSQL"], "source_doc": "engineering_handbook.txt"},
+    {"id": "f06", "category": "factual", "query": "How long are deleted files retained before permanent removal?", "answer_spans": ["recovery bin for 30 days"], "source_doc": "cloudsync_product.txt"},
+    {"id": "f07", "category": "factual", "query": "What security certification does TechCorp maintain?", "answer_spans": ["SOC 2 Type II"], "source_doc": "security_policy.txt"},
+    {"id": "f08", "category": "factual", "query": "How many previous versions does CloudSync Pro keep?", "answer_spans": ["100 previous versions"], "source_doc": "cloudsync_product.txt"},
+    {"id": "f09", "category": "factual", "query": "What algorithm is used to hash user passwords?", "answer_spans": ["bcrypt"], "source_doc": "security_policy.txt"},
+    {"id": "f10", "category": "factual", "query": "What is the minimum test coverage requirement?", "answer_spans": ["80 percent"], "source_doc": "engineering_handbook.txt"},
+
+    {"id": "m01", "category": "multi_hop", "query": "Which programming languages does TechCorp use for its backend?", "answer_spans": ["Python", "Go"], "source_doc": "engineering_handbook.txt"},
+    {"id": "m02", "category": "multi_hop", "query": "What are the CloudSync Pro storage tiers and their monthly prices?", "answer_spans": ["Starter tier", "Business tier", "12 dollars", "22 dollars"], "source_doc": "cloudsync_product.txt"},
+    {"id": "m03", "category": "multi_hop", "query": "How does TechCorp handle an incident from response through postmortem?", "answer_spans": ["incident commander", "blameless postmortem"], "source_doc": "engineering_handbook.txt"},
+    {"id": "m04", "category": "multi_hop", "query": "Which data protection regulations does TechCorp comply with?", "answer_spans": ["General Data Protection Regulation", "California Consumer Privacy Act"], "source_doc": "security_policy.txt"},
+    {"id": "m05", "category": "multi_hop", "query": "How does the API authenticate requests and manage keys?", "answer_spans": ["bearer token", "API keys are issued"], "source_doc": "api_reference.txt"},
+
+    {"id": "p01", "category": "paraphrase", "query": "In what year did the company come into existence?", "answer_spans": ["founded in 2010"], "source_doc": "company_overview.txt"},
+    {"id": "p02", "category": "paraphrase", "query": "How big is the TechCorp workforce?", "answer_spans": ["more than 320 people"], "source_doc": "company_overview.txt"},
+    {"id": "p03", "category": "paraphrase", "query": "What happens if I send too many requests to the API?", "answer_spans": ["429", "Retry-After"], "source_doc": "api_reference.txt"},
+    {"id": "p04", "category": "paraphrase", "query": "Can I recover a file after I delete it?", "answer_spans": ["recovery bin for 30 days"], "source_doc": "cloudsync_product.txt"},
+    {"id": "p05", "category": "paraphrase", "query": "Who started the company?", "answer_spans": ["Elena Marlowe", "Raj Patel"], "source_doc": "company_overview.txt"},
+
+    {"id": "k01", "category": "keyword", "query": "AES-256 encryption at rest", "answer_spans": ["AES-256"], "source_doc": "cloudsync_product.txt"},
+    {"id": "k02", "category": "keyword", "query": "SOC 2 Type II certification", "answer_spans": ["SOC 2 Type II"], "source_doc": "security_policy.txt"},
+    {"id": "k03", "category": "keyword", "query": "bring-your-own-key encryption", "answer_spans": ["bring-your-own-key"], "source_doc": "cloudsync_product.txt"},
+    {"id": "k04", "category": "keyword", "query": "blue-green deployment strategy", "answer_spans": ["blue-green"], "source_doc": "engineering_handbook.txt"},
+    {"id": "k05", "category": "keyword", "query": "FIDO2 hardware security keys", "answer_spans": ["FIDO2"], "source_doc": "security_policy.txt"},
+
+    {"id": "n01", "category": "negative", "query": "What is TechCorp's stock ticker symbol?", "answer_spans": [], "expect_no_answer": true},
+    {"id": "n02", "category": "negative", "query": "Does TechCorp make a mobile racing game?", "answer_spans": [], "expect_no_answer": true},
+    {"id": "n03", "category": "negative", "query": "What is the CEO's favorite restaurant in Paris?", "answer_spans": [], "expect_no_answer": true},
+    {"id": "n04", "category": "negative", "query": "How do I return a physical hardware product for a refund?", "answer_spans": [], "expect_no_answer": true},
+    {"id": "n05", "category": "negative", "query": "What are the opening hours of the Tokyo office?", "answer_spans": [], "expect_no_answer": true}
+  ]
+}
