@@ -1,0 +1,21 @@
+CloudSync Pro — Product Documentation
+
+CloudSync Pro is TechCorp's enterprise file storage and synchronization platform. It provides secure, cross-device file access with automatic conflict resolution and versioning.
+
+Storage Tiers
+CloudSync Pro is offered in three tiers. The Starter tier includes 1 terabyte of storage and supports up to 10 users. The Business tier includes 10 terabytes and supports up to 250 users. The Enterprise tier offers unlimited storage with custom user provisioning and a dedicated account manager.
+
+Encryption and Security
+All files stored in CloudSync Pro are encrypted at rest using AES-256 encryption. Data in transit is protected with TLS 1.3. CloudSync Pro supports client-side encryption, meaning files can be encrypted on the user's device before upload, so that TechCorp never has access to the plaintext contents. Encryption keys can be managed by the customer through the bring-your-own-key feature.
+
+Versioning and Recovery
+CloudSync Pro retains up to 100 previous versions of every file. Deleted files are kept in a recovery bin for 30 days before permanent removal. Administrators can configure legal hold policies that prevent deletion of specific files or folders for compliance purposes.
+
+Synchronization
+The synchronization engine uses a block-level delta algorithm, meaning only the changed portions of a file are uploaded rather than the entire file. This makes CloudSync Pro efficient for large files that change frequently, such as design assets and virtual machine images. Selective sync allows users to choose which folders are downloaded to each device.
+
+Integrations
+CloudSync Pro integrates with Microsoft 365, Google Workspace, and Slack. A REST API is available for custom integrations. Single sign-on is supported through SAML 2.0 and OpenID Connect.
+
+Pricing
+The Starter tier costs 12 dollars per user per month. The Business tier costs 22 dollars per user per month. Enterprise pricing is custom and negotiated per contract. A 14-day free trial is available for the Starter and Business tiers.

@@ -1,0 +1,24 @@
+TechCorp Platform API Reference
+
+The TechCorp Platform API is a RESTful interface for programmatic access to CloudSync Pro and the AI Assistant Platform. All endpoints are served over HTTPS from the base URL api.techcorp.example slash v2.
+
+Authentication
+The API uses bearer token authentication. Every request must include an Authorization header containing a valid API key in the form "Bearer YOUR_API_KEY". API keys are issued from the developer dashboard and can be scoped to specific permissions. Keys can be rotated at any time, and a revoked key stops working immediately.
+
+Rate Limits
+The API enforces a rate limit of 1000 requests per minute for standard accounts and 5000 requests per minute for enterprise accounts. When a client exceeds the limit, the API responds with HTTP status code 429 and a Retry-After header indicating how many seconds to wait. Clients are expected to implement exponential backoff.
+
+Core Endpoints
+The GET slash files endpoint lists files in a CloudSync workspace. The POST slash files endpoint uploads a new file. The GET slash files slash id endpoint retrieves metadata for a specific file. The DELETE slash files slash id endpoint moves a file to the recovery bin. The POST slash assistant slash query endpoint sends a prompt to the AI Assistant Platform and returns a generated response.
+
+Pagination
+List endpoints return at most 100 items per page. Responses include a next_cursor field. To retrieve the next page, pass the cursor value in the cursor query parameter. When next_cursor is null, there are no more results.
+
+Error Handling
+The API returns standard HTTP status codes. A 400 indicates a malformed request, a 401 indicates an invalid or missing API key, a 403 indicates insufficient permissions, and a 404 indicates a missing resource. Error responses include a JSON body with an error code and a human-readable message.
+
+Webhooks
+The API can deliver webhooks for events such as file uploads and completed assistant jobs. Webhook payloads are signed with an HMAC-SHA256 signature in the X-TechCorp-Signature header, which clients should verify before trusting the payload.
+
+Versioning
+The current API version is v2. The previous version, v1, is deprecated and will reach end of life in December 2025. Breaking changes are only introduced in new major versions, and TechCorp provides at least twelve months of notice before retiring a version.

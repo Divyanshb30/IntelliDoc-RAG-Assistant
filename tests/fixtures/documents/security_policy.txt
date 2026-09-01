@@ -1,0 +1,24 @@
+TechCorp Security and Compliance Policy
+
+This document describes TechCorp's security practices, compliance certifications, and data handling commitments.
+
+Compliance Certifications
+TechCorp maintains SOC 2 Type II certification, which is audited annually by an independent third party. The company is also compliant with the General Data Protection Regulation for European customers and the California Consumer Privacy Act. CloudSync Pro has achieved ISO 27001 certification for information security management.
+
+Data Residency
+Customers can choose where their data is stored. TechCorp operates data centers in the United States, the European Union, and Australia. Enterprise customers can request that all their data remain within a specific region to satisfy data residency requirements. Data is never transferred outside the selected region without explicit customer consent.
+
+Password and Authentication Policy
+User passwords must be at least twelve characters long and are hashed using the bcrypt algorithm with a work factor of twelve. Multi-factor authentication is required for all administrative accounts and is strongly recommended for all users. TechCorp supports hardware security keys based on the FIDO2 standard.
+
+Vulnerability Management
+TechCorp runs automated vulnerability scans on all production systems weekly. A dedicated security team performs manual penetration testing quarterly. The company operates a bug bounty program through which external researchers can report vulnerabilities in exchange for monetary rewards. Critical vulnerabilities are patched within 24 hours of confirmation.
+
+Incident Notification
+In the event of a data breach affecting customer data, TechCorp commits to notifying affected customers within 72 hours of confirming the breach. Notifications include the nature of the breach, the data involved, and the remediation steps taken.
+
+Employee Access
+Employee access to customer data follows the principle of least privilege. Access to production systems requires multi-factor authentication and is logged and audited. All employees complete mandatory security training annually, and access rights are reviewed every quarter.
+
+Backups and Disaster Recovery
+Customer data is backed up continuously, with point-in-time recovery available for the previous 35 days. TechCorp maintains a recovery time objective of four hours and a recovery point objective of fifteen minutes for its core services. Disaster recovery drills are conducted twice per year.

@@ -1,0 +1,16 @@
+{
+  "_comment": "Pinned quality gates. CI fails if measured metrics drop below these floors. Set conservatively below observed values to avoid flakiness while still catching real regressions. Regenerate context with: python eval/run_benchmarks.py",
+  "retrieval_hybrid": {
+    "mrr_at_5": 0.85,
+    "recall_at_3": 0.92,
+    "ndcg_at_5": 0.88
+  },
+  "retrieval_reranked": {
+    "mrr_at_5": 0.95,
+    "recall_at_1": 0.92
+  },
+  "analyzer": {
+    "f1": 0.90,
+    "max_false_positives_on_clean": 0
+  }
+}

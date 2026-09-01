@@ -1,0 +1,18 @@
+TechCorp Solutions — Company Overview
+
+TechCorp Solutions is a leading enterprise software company founded in 2010 by Elena Marlowe and Raj Patel. The company is headquartered in San Francisco, California, with additional engineering offices in New York and London. TechCorp specializes in artificial intelligence, cloud infrastructure, and enterprise data platforms.
+
+Products
+TechCorp offers three flagship products. CloudSync Pro is an enterprise cloud storage and synchronization solution with end-to-end encryption. The AI Assistant Platform is a customizable framework for building domain-specific chatbots and virtual agents. DataViz Suite is a business intelligence toolkit for real-time analytics and dashboard creation.
+
+Team and Culture
+As of 2024, TechCorp employs more than 320 people worldwide, of whom roughly 180 are engineers. The company operates on a hybrid work model, with employees expected in the office three days per week. TechCorp is known for its strong engineering culture and its internal "Ship Weekly" philosophy, which encourages small, frequent releases over large quarterly launches.
+
+Funding and Financials
+TechCorp raised a Series C round of 85 million dollars in 2022, led by Horizon Ventures. Annual recurring revenue crossed 120 million dollars in fiscal year 2023. The company has been profitable since the fourth quarter of 2023.
+
+Awards and Recognition
+TechCorp was named Best AI Solution Provider in 2023 by the Enterprise Software Awards. It received the Top Cloud Services Company award in 2022 and an Innovation Award in Enterprise Software in 2021. The DataViz Suite was recognized as Product of the Year by Analytics Weekly in 2023.
+
+Contact
+General inquiries can be directed to info@techcorp.example. The support hotline operates Monday through Friday, 9 AM to 6 PM Pacific Time. TechCorp's registered office is located at 500 Market Street, San Francisco, California.

@@ -1,0 +1,100 @@
+{
+  "search_mode": {
+    "dense_only": {
+      "mrr_at_5": 0.8833,
+      "recall_at_1": 0.8,
+      "recall_at_3": 0.96,
+      "recall_at_5": 1.0,
+      "ndcg_at_5": 0.9129,
+      "n_answerable": 25,
+      "negative_rejection_rate": 0.6,
+      "n_negative": 5
+    },
+    "hybrid": {
+      "mrr_at_5": 0.9067,
+      "recall_at_1": 0.84,
+      "recall_at_3": 1.0,
+      "recall_at_5": 1.0,
+      "ndcg_at_5": 0.9305,
+      "n_answerable": 25,
+      "negative_rejection_rate": 0.6,
+      "n_negative": 5
+    }
+  },
+  "reranking": {
+    "no_rerank": {
+      "mrr_at_5": 0.9067,
+      "recall_at_1": 0.84,
+      "recall_at_3": 1.0,
+      "recall_at_5": 1.0,
+      "ndcg_at_5": 0.9305,
+      "n_answerable": 25,
+      "negative_rejection_rate": 0.6,
+      "n_negative": 5
+    },
+    "with_rerank": {
+      "mrr_at_5": 1.0,
+      "recall_at_1": 1.0,
+      "recall_at_3": 1.0,
+      "recall_at_5": 1.0,
+      "ndcg_at_5": 1.0,
+      "n_answerable": 25,
+      "negative_rejection_rate": 0.6,
+      "n_negative": 5
+    }
+  },
+  "chunk_size": {
+    "128": {
+      "mrr_at_5": 0.8633,
+      "recall_at_1": 0.76,
+      "recall_at_3": 0.96,
+      "recall_at_5": 1.0,
+      "ndcg_at_5": 0.8982,
+      "n_answerable": 25,
+      "negative_rejection_rate": 0.6,
+      "n_negative": 5
+    },
+    "256": {
+      "mrr_at_5": 0.9067,
+      "recall_at_1": 0.84,
+      "recall_at_3": 1.0,
+      "recall_at_5": 1.0,
+      "ndcg_at_5": 0.9305,
+      "n_answerable": 25,
+      "negative_rejection_rate": 0.6,
+      "n_negative": 5
+    },
+    "512": {
+      "mrr_at_5": 0.93,
+      "recall_at_1": 0.88,
+      "recall_at_3": 0.96,
+      "recall_at_5": 1.0,
+      "ndcg_at_5": 0.9477,
+      "n_answerable": 25,
+      "negative_rejection_rate": 0.6,
+      "n_negative": 5
+    }
+  },
+  "chunking_method": {
+    "word_split": {
+      "mrr_at_5": 0.8933,
+      "recall_at_1": 0.8,
+      "recall_at_3": 1.0,
+      "recall_at_5": 1.0,
+      "ndcg_at_5": 0.9209,
+      "n_answerable": 25,
+      "negative_rejection_rate": 0.6,
+      "n_negative": 5
+    },
+    "sentence_aware": {
+      "mrr_at_5": 0.9067,
+      "recall_at_1": 0.84,
+      "recall_at_3": 1.0,
+      "recall_at_5": 1.0,
+      "ndcg_at_5": 0.9305,
+      "n_answerable": 25,
+      "negative_rejection_rate": 0.6,
+      "n_negative": 5
+    }
+  }
+}

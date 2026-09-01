@@ -1,0 +1,21 @@
+TechCorp Engineering Handbook
+
+This handbook describes the engineering practices, technology choices, and operational standards used across TechCorp's engineering organization.
+
+Technology Stack
+TechCorp's backend services are written primarily in Python and Go. Python is used for data processing, machine learning pipelines, and internal tooling, while Go is used for high-throughput network services. The primary database is PostgreSQL, with Redis used for caching and ephemeral state. Message queues are built on Apache Kafka.
+
+Deployment and Infrastructure
+All services run on Kubernetes clusters hosted on Amazon Web Services. Infrastructure is managed with Terraform, and configuration follows an infrastructure-as-code discipline. Deployments use a blue-green strategy to minimize downtime. Every production deployment must pass an automated test suite and a staged canary rollout before reaching all users.
+
+Code Review Policy
+Every change to production code requires review and approval from at least one other engineer. Changes to security-sensitive systems require two approvals, one of which must come from a member of the security team. Pull requests are expected to remain under 400 lines of changed code to keep reviews tractable.
+
+Testing Standards
+TechCorp requires a minimum of 80 percent test coverage for all backend services. Engineers write unit tests, integration tests, and end-to-end tests. Continuous integration runs the full test suite on every pull request, and a failing test blocks the merge. Load testing is performed before any major release.
+
+On-Call and Incident Response
+Engineering teams operate a follow-the-sun on-call rotation. When an incident occurs, the on-call engineer becomes the incident commander until the issue is resolved. Every incident is followed by a blameless postmortem within five business days. The postmortem focuses on systemic causes rather than individual blame.
+
+Observability
+All services emit structured logs in JSON format and export metrics to Prometheus. Distributed tracing is implemented with OpenTelemetry. Dashboards are built in Grafana, and alerts route through PagerDuty. The engineering standard is that any user-facing error rate above one percent triggers an automatic alert.
