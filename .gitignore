@@ -38,6 +38,13 @@ vector_store/
 *.faiss
 *.pkl
 
+# Testing / coverage
+.coverage
+.coverage.*
+htmlcov/
+.pytest_cache/
+.ruff_cache/
+
 # IDE
 .vscode/
 .idea/
@@ -52,13 +59,15 @@ Thumbs.db
 # Temporary files
 temp/
 tmp/
+uploads/
 *.log
 
-# Data files (users will add their own)
+# User-supplied documents (the committed sample corpus lives in data/sample/)
 data/*.txt
 data/*.pdf
 data/*.csv
 !data/sample.txt
+!data/sample/
 
 # Environment variables
 .env
