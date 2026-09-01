@@ -1,83 +1,146 @@
-import gradio as gr
-from transformers import AutoModelForCausalLM, AutoTokenizer
-import torch
-from rag import RAGPipeline
-from tools import get_tools
-from agent import RAGAgent
-import os
-import pypdf
-import spaces  # required for ZeroGPU
+"""Gradio front-end for IntelliCode, deployed on HuggingFace Spaces (ZeroGPU).
 
-# Patch gradio 4.44.0 bool schema bug
-import gradio_client.utils as _gcu
-_orig = _gcu._json_schema_to_python_type
-def _patched(schema, defs=None):
+Two modes:
+  * Documents     — RAG Q&A over uploaded files (Qwen2.5-3B + hybrid retrieval).
+  * Code Analysis — AST-powered analysis, security scan, tests, execution.
+
+The LLM is optional: if it cannot be loaded (e.g. no GPU), the agent falls
+back to deterministic template answers so the app still works.
+"""
+
+from __future__ import annotations
+
+import logging
+import os
+import shutil
+import sys
+
+# Make the src/ layout importable on HuggingFace Spaces without a pip install.
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "src"))
+
+import gradio as gr
+
+# Work around a gradio 4.44.0 bug where boolean JSON schemas crash type parsing.
+import gradio_client.utils as _gcu  # noqa: E402
+
+_orig_json_schema = _gcu._json_schema_to_python_type
+
+
+def _patched_json_schema(schema, defs=None):
     if isinstance(schema, bool):
         return "any"
-    return _orig(schema, defs)
-_gcu._json_schema_to_python_type = _patched
+    return _orig_json_schema(schema, defs)
 
-# ── Global state ──────────────────────────────────────────────────────────────
-rag = RAGPipeline()
-tools = get_tools(rag)
 
-MODEL_ID = "Qwen/Qwen2.5-3B-Instruct"
-print("Loading Qwen2.5-3B...")
-tokenizer = AutoTokenizer.from_pretrained(MODEL_ID, trust_remote_code=True)
-model = AutoModelForCausalLM.from_pretrained(
-    MODEL_ID,
-    torch_dtype=torch.float16,
-    device_map="auto",
-    trust_remote_code=True
-)
-llm = {"model": model, "tokenizer": tokenizer}
-agent = RAGAgent(llm, tools)
-print("Model loaded ✓")
+_gcu._json_schema_to_python_type = _patched_json_schema
 
-current_code_file = {"path": None, "name": None}
+from intellicode.agent import RAGAgent  # noqa: E402
+from intellicode.config import Settings, configure_logging  # noqa: E402
+from intellicode.rag import RAGPipeline  # noqa: E402
+from intellicode.tools import get_tools  # noqa: E402
+
+# ── ZeroGPU shim ──────────────────────────────────────────────────────────────
+try:
+    import spaces  # type: ignore
+
+    gpu_decorator = spaces.GPU
+except ImportError:  # running locally without the `spaces` package
+
+    def gpu_decorator(fn):  # type: ignore
+        return fn
+
+
+configure_logging()
+logger = logging.getLogger(__name__)
+
+# ── Core components ───────────────────────────────────────────────────────────
+settings = Settings()
+pipeline = RAGPipeline(settings)
+tools = get_tools(pipeline)
+
+
+def _load_llm():
+    """Load the LLM, returning None on failure so the app degrades gracefully."""
+    try:
+        from intellicode.llm import QwenLLM
+
+        return QwenLLM.from_pretrained(settings)
+    except Exception as exc:  # noqa: BLE001 — model load can fail many ways
+        logger.warning("LLM unavailable, using template answers: %s", exc)
+        return None
+
+
+llm = _load_llm()
+agent = RAGAgent(tools, llm=llm)
+
+current_code_file: dict[str, str | None] = {"path": None, "name": None}
+
 
 # ── File handlers ─────────────────────────────────────────────────────────────
-def handle_doc_upload(files):
+
+
+def handle_doc_upload(files) -> str:
+    """Copy uploaded documents into the data directory (PDF → text)."""
     if not files:
         return "No files uploaded."
     os.makedirs("data", exist_ok=True)
-    names = []
+    names: list[str] = []
     for f in files:
         fname = os.path.basename(f.name)
         dest = os.path.join("data", fname)
-        if fname.endswith(".pdf"):
-            reader = pypdf.PdfReader(f.name)
-            text = "\n\n".join([p.extract_text() for p in reader.pages])
-            with open(dest.replace(".pdf", ".txt"), "w", encoding="utf-8") as out:
-                out.write(text)
-        else:
-            import shutil
-            shutil.copy(f.name, dest)
-        names.append(fname)
-    return f"✅ Uploaded: {', '.join(names)}"
+        try:
+            if fname.endswith(".pdf"):
+                import pypdf
 
-def build_index():
+                reader = pypdf.PdfReader(f.name)
+                text = "\n\n".join(page.extract_text() or "" for page in reader.pages)
+                with open(dest.replace(".pdf", ".txt"), "w", encoding="utf-8") as out:
+                    out.write(text)
+            else:
+                shutil.copy(f.name, dest)
+            names.append(fname)
+        except (OSError, ValueError) as exc:
+            logger.error("Failed to ingest %s: %s", fname, exc)
+            return f"Error ingesting {fname}: {exc}"
+    return f"Uploaded: {', '.join(names)}"
+
+
+def build_index() -> str:
+    """Build the retrieval index from the data directory."""
     try:
-        rag.build_index("data")
-        return "✅ Knowledge base ready!"
-    except Exception as e:
-        return f"❌ Error: {e}"
+        count = pipeline.build_index_from_directory("data")
+        if count == 0:
+            return "No documents found. Upload files first."
+        return f"Knowledge base ready — {count} chunks indexed."
+    except FileNotFoundError:
+        return "No data directory. Upload documents first."
+    except Exception as exc:  # noqa: BLE001
+        logger.error("Index build failed: %s", exc)
+        return f"Error building index: {exc}"
 
-def handle_code_upload(file):
+
+def handle_code_upload(file) -> str:
+    """Stash an uploaded Python file for the code-analysis tools."""
     if not file:
         return "No file uploaded."
-    os.makedirs("temp", exist_ok=True)
+    os.makedirs("uploads", exist_ok=True)
     fname = os.path.basename(file.name)
-    dest = os.path.join("temp", fname)
-    import shutil
-    shutil.copy(file.name, dest)
+    dest = os.path.join("uploads", fname)
+    try:
+        shutil.copy(file.name, dest)
+    except OSError as exc:
+        return f"Error loading {fname}: {exc}"
     current_code_file["path"] = dest
     current_code_file["name"] = fname
-    return f"✅ Loaded: {fname}"
+    return f"Loaded: {fname}"
+
 
 # ── Chat handler ──────────────────────────────────────────────────────────────
-@spaces.GPU
-def chat(message, history, mode):
+
+
+@gpu_decorator
+def chat(message: str, history: list, mode: str):
+    """Route a message through the agent and append the answer to history."""
     if not message.strip():
         return history, ""
 
@@ -86,139 +149,115 @@ def chat(message, history, mode):
         file_context = {
             "path": current_code_file["path"],
             "name": current_code_file["name"],
-            "type": "code"
+            "type": "code",
         }
 
-    result = agent.execute(message, file_context=file_context)
+    result = agent.execute(message, file_context=file_context).to_dict()
     answer = result.get("answer", "No response generated.")
-    tool = result.get("tool_used", "")
-    raw = result.get("raw_output", {})
-
-    # Append tool detail to answer
-    if tool == "code_analyzer" and raw.get("issues"):
-        issues = raw["issues"]
-        answer += f"\n\n**Issues Found:** {len(issues)} | **Severity:** {raw.get('severity','N/A')}"
-        for i in issues[:3]:
-            answer += f"\n- Line {i.get('line','?')}: `{i.get('type','')}` ({i.get('severity','')}) — {i.get('message','')}"
-
-    elif tool == "security_scanner" and raw.get("vulnerabilities"):
-        vulns = raw["vulnerabilities"]
-        answer += f"\n\n**Risk Level:** {raw.get('risk_level','N/A')} | **Vulnerabilities:** {len(vulns)}"
-        for v in vulns[:3]:
-            answer += f"\n- Line {v.get('line','?')}: `{v.get('type','')}` ({v.get('severity','')}) — {v.get('description','')}"
-
-    elif tool == "code_executor":
-        output = raw.get("output", "")
-        error = raw.get("error", "")
-        if output:
-            answer += f"\n\n```\n{output[:500]}\n```"
-        if error:
-            answer += f"\n\n**Error:**\n```\n{error[:300]}\n```"
-
-    elif tool == "test_generator":
-        answer += f"\n\n**Test file:** `{raw.get('test_file','N/A')}`"
-        funcs = raw.get("functions", [])
-        if funcs:
-            answer += "\n**Functions tested:** " + ", ".join([f"`{f}()`" for f in funcs])
-
-    elif tool == "code_fixer" and raw.get("fixes"):
-        fixes = raw["fixes"][:3]
-        for i, fix in enumerate(fixes, 1):
-            answer += f"\n\n**Fix #{i} — Line {fix.get('line','?')} ({fix.get('severity','')}):**"
-            answer += f"\n> {fix.get('fix','')}"
-            if fix.get("code_example"):
-                answer += f"\n```python\n{fix['code_example']}\n```"
+    answer = _augment_answer(answer, result.get("tool_used", ""), result.get("raw_output", {}))
 
     history.append((message, answer))
     return history, ""
 
-def quick_action(action, history, mode):
-    return chat(action, history, mode)
+
+def _augment_answer(answer: str, tool: str, raw: dict) -> str:
+    """Append structured tool detail to the natural-language answer."""
+    if tool == "code_analyzer" and raw.get("issues"):
+        issues = raw["issues"]
+        answer += f"\n\n**Issues:** {len(issues)} | **Severity:** {raw.get('severity', 'N/A')}"
+        for i in issues[:3]:
+            answer += f"\n- Line {i.get('line', '?')}: `{i.get('type', '')}` ({i.get('severity', '')})"
+    elif tool == "security_scanner" and raw.get("vulnerabilities"):
+        vulns = raw["vulnerabilities"]
+        answer += f"\n\n**Risk:** {raw.get('risk_level', 'N/A')} | **Findings:** {len(vulns)}"
+        for v in vulns[:3]:
+            answer += f"\n- Line {v.get('line', '?')}: `{v.get('type', '')}` ({v.get('severity', '')})"
+    elif tool == "code_executor":
+        if raw.get("output"):
+            answer += f"\n\n```\n{raw['output'][:500]}\n```"
+        if raw.get("error"):
+            answer += f"\n\n**Error:**\n```\n{raw['error'][:300]}\n```"
+    elif tool == "test_generator" and raw.get("test_code"):
+        answer += f"\n\n```python\n{raw['test_code'][:600]}\n```"
+    elif tool == "code_fixer" and raw.get("fixes"):
+        for i, fix in enumerate(raw["fixes"][:3], 1):
+            answer += f"\n\n**Fix #{i} — line {fix.get('line', '?')}:** {fix.get('fix', '')}"
+            if fix.get("code_example"):
+                answer += f"\n```python\n{fix['code_example']}\n```"
+    return answer
+
 
 # ── UI ────────────────────────────────────────────────────────────────────────
-with gr.Blocks(title="IntelliCode RAG Assistant", theme=gr.themes.Soft()) as demo:
-    gr.Markdown("# IntelliCode RAG Assistant\n* AI for code analysis & document Q&A — Qwen2.5-3B | FAISS | Python AST*")
 
-    with gr.Row():
-        # ── Left sidebar ──
-        with gr.Column(scale=1):
-            mode = gr.Radio(
-                ["Documents", "Code Analysis"],
-                value="Documents",
-                label="Mode"
+
+def build_ui() -> gr.Blocks:
+    """Construct the Gradio Blocks interface."""
+    with gr.Blocks(title="IntelliCode RAG Assistant", theme=gr.themes.Soft()) as demo:
+        gr.Markdown(
+            "# IntelliCode RAG Assistant\n"
+            "*Hybrid RAG (dense + BM25 + reranking) & AST code analysis — "
+            "Qwen2.5-3B · FAISS · Python AST*"
+        )
+        with gr.Row():
+            with gr.Column(scale=1):
+                mode = gr.Radio(["Documents", "Code Analysis"], value="Documents", label="Mode")
+
+                with gr.Group(visible=True) as doc_panel:
+                    gr.Markdown("### Documents")
+                    doc_upload = gr.File(
+                        label="Upload files",
+                        file_types=[".txt", ".pdf", ".csv", ".md"],
+                        file_count="multiple",
+                    )
+                    doc_status = gr.Textbox(label="", interactive=False, lines=1)
+                    build_btn = gr.Button("Build Knowledge Base", variant="primary")
+                    build_status = gr.Textbox(label="", interactive=False, lines=1)
+
+                with gr.Group(visible=False) as code_panel:
+                    gr.Markdown("### Code Analysis")
+                    code_upload = gr.File(label="Upload Python file", file_types=[".py"])
+                    code_status = gr.Textbox(label="", interactive=False, lines=1)
+                    gr.Markdown("### Quick Actions")
+                    with gr.Row():
+                        btn_analyze = gr.Button("Analyze", size="sm")
+                        btn_security = gr.Button("Security", size="sm")
+                    with gr.Row():
+                        btn_tests = gr.Button("Gen Tests", size="sm")
+                        btn_fix = gr.Button("Fix Issues", size="sm")
+                    with gr.Row():
+                        btn_run = gr.Button("Run Code", size="sm")
+
+            with gr.Column(scale=3):
+                chatbot = gr.Chatbot(label="IntelliCode", height=550)
+                with gr.Row():
+                    msg = gr.Textbox(placeholder="Ask about your code or documents…", show_label=False, scale=5)
+                    send_btn = gr.Button("Send", variant="primary", scale=1)
+
+        def toggle_mode(m):
+            return gr.update(visible=m == "Documents"), gr.update(visible=m == "Code Analysis")
+
+        mode.change(toggle_mode, inputs=mode, outputs=[doc_panel, code_panel])
+        doc_upload.change(handle_doc_upload, inputs=doc_upload, outputs=doc_status)
+        build_btn.click(build_index, outputs=build_status)
+        code_upload.change(handle_code_upload, inputs=code_upload, outputs=code_status)
+        send_btn.click(chat, inputs=[msg, chatbot, mode], outputs=[chatbot, msg])
+        msg.submit(chat, inputs=[msg, chatbot, mode], outputs=[chatbot, msg])
+
+        for button, prompt in [
+            (btn_analyze, "Analyze this code"),
+            (btn_security, "Check security vulnerabilities"),
+            (btn_tests, "Generate pytest tests"),
+            (btn_fix, "Fix the issues"),
+            (btn_run, "Run this code"),
+        ]:
+            button.click(
+                lambda h, m, p=prompt: chat(p, h, m),
+                inputs=[chatbot, mode],
+                outputs=[chatbot, msg],
             )
 
-            with gr.Group(visible=True) as doc_panel:
-                gr.Markdown("### 📄 Documents")
-                doc_upload = gr.File(
-                    label="Upload files",
-                    file_types=[".txt", ".pdf", ".csv", ".md"],
-                    file_count="multiple"
-                )
-                doc_status = gr.Textbox(label="", interactive=False, lines=1)
-                build_btn = gr.Button("Build Knowledge Base", variant="primary")
-                build_status = gr.Textbox(label="", interactive=False, lines=1)
+    return demo
 
-            with gr.Group(visible=False) as code_panel:
-                gr.Markdown("### 💻 Code Analysis")
-                code_upload = gr.File(
-                    label="Upload Python file",
-                    file_types=[".py"]
-                )
-                code_status = gr.Textbox(label="", interactive=False, lines=1)
-
-                gr.Markdown("### ⚡ Quick Actions")
-                with gr.Row():
-                    btn_analyze = gr.Button("Analyze Code", size="sm")
-                    btn_security = gr.Button("Security Scan", size="sm")
-                with gr.Row():
-                    btn_tests = gr.Button("Generate Tests", size="sm")
-                    btn_fix = gr.Button("Fix Issues", size="sm")
-                with gr.Row():
-                    btn_run = gr.Button("Run Code", size="sm")
-                    btn_explain = gr.Button("Explain Code", size="sm")
-
-        # ── Chat area ──
-        with gr.Column(scale=3):
-            chatbot = gr.Chatbot(
-                label="IntelliCode RAG",
-                height=550,
-                bubble_full_width=False
-            )
-            with gr.Row():
-                msg = gr.Textbox(
-                    placeholder="Ask about your code or documents...",
-                    show_label=False,
-                    scale=5
-                )
-                send_btn = gr.Button("Send", variant="primary", scale=1)
-
-            gr.Markdown("*Powered by Qwen2.5-3B | FAISS | Python AST | v2.0*")
-
-    # ── Mode toggle ──
-    def toggle_mode(m):
-        return gr.update(visible=m == "Documents"), gr.update(visible=m == "Code Analysis")
-
-    mode.change(toggle_mode, inputs=mode, outputs=[doc_panel, code_panel])
-
-    # ── File events ──
-    doc_upload.change(handle_doc_upload, inputs=doc_upload, outputs=doc_status)
-    build_btn.click(build_index, outputs=build_status)
-    code_upload.change(handle_code_upload, inputs=code_upload, outputs=code_status)
-
-    # ── Chat events ──
-    send_btn.click(chat, inputs=[msg, chatbot, mode], outputs=[chatbot, msg])
-    msg.submit(chat, inputs=[msg, chatbot, mode], outputs=[chatbot, msg])
-
-    # ── Quick action buttons ──
-    btn_analyze.click(lambda h, m: quick_action("Analyze this code", h, m), inputs=[chatbot, mode], outputs=[chatbot, msg])
-    btn_security.click(lambda h, m: quick_action("Check security vulnerabilities", h, m), inputs=[chatbot, mode], outputs=[chatbot, msg])
-    btn_tests.click(lambda h, m: quick_action("Generate pytest tests", h, m), inputs=[chatbot, mode], outputs=[chatbot, msg])
-    btn_fix.click(lambda h, m: quick_action("Fix the issues", h, m), inputs=[chatbot, mode], outputs=[chatbot, msg])
-    btn_run.click(lambda h, m: quick_action("Run this code", h, m), inputs=[chatbot, mode], outputs=[chatbot, msg])
-    btn_explain.click(lambda h, m: quick_action("Explain this code", h, m), inputs=[chatbot, mode], outputs=[chatbot, msg])
 
 if __name__ == "__main__":
-    demo.launch()
-
-
+    build_ui().launch()
