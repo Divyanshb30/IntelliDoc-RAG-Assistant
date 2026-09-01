@@ -24,19 +24,9 @@ A retrieval-augmented assistant that pairs a **hybrid dense + sparse retriever w
 
 ## Benchmarks
 
-Retrieval quality on a 30-query labeled evaluation set (25 answerable + 5 out-of-corpus distractors) over a 5-document corpus. Each stage is an ablation adding **one** technique. Reproduce with `python eval/run_benchmarks.py`.
+Retrieval and analysis are measured by the same harness on a labeled eval set, and both are **regression-gated on every push** via [`eval/baselines.json`](eval/baselines.json) — a change that drops MRR@5, Recall@3, or analyzer F1 below the floor fails CI. Relevance is scored by answer-span containment ([`evaluation.py`](src/intellicode/evaluation.py)), which stays valid when chunk boundaries change. Retrieval ablations (dense vs hybrid vs reranked, chunk size, chunking method) are in [Ablations](#ablations); reproduce everything with `python eval/run_benchmarks.py`.
 
-| Configuration | MRR@5 | Recall@1 | Recall@3 | NDCG@5 |
-|---|:---:|:---:|:---:|:---:|
-| Dense only (MiniLM + FAISS) | 0.883 | 0.800 | 0.960 | 0.913 |
-| **+ Hybrid** (BM25 + RRF) | 0.907 | 0.840 | **1.000** | 0.930 |
-| **+ Cross-encoder rerank** | **1.000** | **1.000** | **1.000** | **1.000** |
-
-Adding lexical hybrid search lifts Recall@3 to a perfect 1.000; cross-encoder reranking then places the answer-bearing chunk **first** on every answerable query.
-
-> **On methodology.** The eval set is deliberately compact so the full gate runs in CI in minutes on CPU. The signal is the **relative lift each stage contributes** and the fact that these numbers are **regression-gated on every push** ([`eval/baselines.json`](eval/baselines.json)) — not an absolute SOTA claim. Relevance is scored by answer-span containment ([`evaluation.py`](src/intellicode/evaluation.py)), which stays valid when chunk boundaries change, and the five out-of-corpus queries verify the retriever *rejects* unanswerable questions rather than confidently hallucinating.
-
-**AST analyzer accuracy** — measured against an annotated ground-truth fixture with a clean-code false-positive control:
+**AST analyzer accuracy** — against an annotated ground-truth fixture with a clean-code false-positive control:
 
 | Precision | Recall | F1 | False positives on clean code |
 |:---:|:---:|:---:|:---:|
@@ -101,32 +91,6 @@ Detects 12 classes of anti-pattern by walking the AST — **including `async def
 | LOW | Broad `except Exception`, unused variables, long functions, missing return type hints, `global` statements, `assert` in production code |
 
 A companion **security scanner** flags hardcoded secrets, SQL injection, weak crypto (MD5/SHA1), `eval`/`exec`/`os.system`, insecure deserialization, `shell=True`, and unsafe `yaml.load`.
-
----
-
-## Quick start
-
-```bash
-git clone https://github.com/Divyanshb30/IntelliDoc-RAG-Assistant.git
-cd IntelliDoc-RAG-Assistant
-pip install -e ".[dev,eval]"
-```
-
-```bash
-pytest tests/            # unit + integration + eval gates (CPU-only)
-python eval/run_benchmarks.py   # regenerate the benchmark tables
-```
-
-```python
-from intellicode.rag import RAGPipeline
-
-rag = RAGPipeline()
-rag.build_index_from_directory("data/sample")
-for hit in rag.query("What products does TechCorp offer?"):
-    print(round(hit.score, 3), hit.text[:80])
-```
-
-Run the Gradio app locally with `python app.py` (falls back to template answers when no GPU/model is available).
 
 ---
 
