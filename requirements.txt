@@ -20,4 +20,9 @@ spaces
 
 # UI + document parsing
 gradio==4.44.0
+# Pin the web stack to what gradio 4.44.0 was built against. starlette 0.41+
+# changed TemplateResponse's signature, which makes gradio 4.44.0 crash with
+# "TypeError: unhashable type: 'dict'" when serving the page.
+fastapi==0.112.2
+starlette==0.38.6
 pypdf>=5.0
